@@ -90,7 +90,7 @@ export const PRODUCTS: Product[] = [
   },
   {
     id: 'm1',
-    name: 'Es Kopi Susu Fattina',
+    name: 'Es Kopi Susu Mantap',
     price: 18000,
     category: 'Minuman',
     description: 'Kopi susu gula aren andalan pendamping makan bolen.',

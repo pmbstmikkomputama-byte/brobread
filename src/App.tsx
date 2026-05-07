@@ -94,7 +94,7 @@ const CATEGORY_DETAILS: Record<string, { description: string, image: string, col
     color: 'from-red-400/10 to-rose-500/10'
   },
   'Minuman': {
-    description: 'Segarkan hari Anda dengan aneka minuman pilihan yang pas bersanding dengan produk Fattina.',
+    description: 'Segarkan hari Anda dengan aneka minuman pilihan yang pas bersanding dengan produk BroBread.',
     image: 'https://images.unsplash.com/photo-1541167760496-162955ed8a9f?q=80&w=800&auto=format&fit=crop',
     color: 'from-blue-400/10 to-cyan-500/10'
   }
@@ -270,7 +270,7 @@ const ReportsDashboard = ({ transactions }: { transactions: Transaction[] }) => 
       <div className="flex flex-col md:flex-row justify-between md:items-end gap-4">
         <div>
           <h2 className="text-3xl font-serif font-black text-bakery-bark">Analisis Penjualan</h2>
-          <p className="text-bakery-muted text-xs font-bold uppercase tracking-widest mt-1">Metrik performa Fattina Bolen hari ini</p>
+          <p className="text-bakery-muted text-xs font-bold uppercase tracking-widest mt-1">Metrik performa BroBread hari ini</p>
         </div>
         <div className="flex gap-2">
            <button 
@@ -1230,8 +1230,8 @@ export default function App() {
   const userRole = currentUser?.role || 'kasir';
   const [adminSection, setAdminSection] = useState<'general' | 'reports' | 'history' | 'catalog'>('general');
   const [systemConfig, setSystemConfig] = useState({
-    name: 'Fattina Bolen',
-    logo: 'F',
+    name: 'BroBread',
+    logo: 'B',
     logoUrl: '',
     address: 'Jl. Raya No. 123, Purwokerto',
     phone: '0812-3456-7890',
@@ -2175,7 +2175,7 @@ export default function App() {
                       >
                         <div className="w-32 h-32 md:w-48 md:h-48 bg-white p-2 md:p-3 rounded-2xl md:rounded-3xl border-4 border-bakery-tan shadow-xl overflow-hidden relative">
                           <img 
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=FattinaBolen-${totalWithTax}`}
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=BroBread-${totalWithTax}`}
                             className={`w-full h-full object-contain ${isProcessingQRIS ? 'blur-sm grayscale' : ''}`}
                             alt="QRIS Code"
                           />

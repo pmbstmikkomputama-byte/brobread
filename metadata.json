@@ -1,0 +1,6 @@
+{
+  "name": "BroBread POS",
+  "description": "Sistem kasir mobile-first untuk toko kue Fattina Bolen, dengan antarmuka yang bersih, manajemen pesanan, dan rekap transaksi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

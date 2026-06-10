@@ -1,0 +1,95 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "A product sold in the bakery",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "category": { "type": "string" },
+        "image": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "name", "price", "category", "image"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "A completed sale transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "product": { "$ref": "Product" },
+              "quantity": { "type": "number" }
+            }
+          }
+        },
+        "total": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "paymentMethod": { "type": "string", "enum": ["cash", "e-wallet", "card"] },
+        "editLogs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "timestamp": { "type": "string", "format": "date-time" },
+              "changedBy": { "type": "string" },
+              "notes": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["id", "items", "total", "timestamp", "paymentMethod"]
+    },
+    "User": {
+      "title": "User",
+      "description": "A staff member of the bakery",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "username": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "kasir"] }
+      },
+      "required": ["id", "name", "username", "role"]
+    },
+    "SystemConfig": {
+      "title": "SystemConfig",
+      "description": "Bakery configuration settings",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "logo": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "primaryColor": { "type": "string" }
+      },
+      "required": ["name", "logo"]
+    }
+  },
+  "firestore": {
+    "products": {
+      "schema": "Product",
+      "description": "Catalog of bakery products"
+    },
+    "transactions": {
+      "schema": "Transaction",
+      "description": "Sales history"
+    },
+    "users": {
+      "schema": "User",
+      "description": "Staff account details (public info)"
+    },
+    "systemConfigs": {
+      "schema": "SystemConfig",
+      "description": "Global application configuration"
+    }
+  }
+}

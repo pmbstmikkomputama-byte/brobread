@@ -47,7 +47,9 @@ import {
   Lock,
   Key,
   User as UserIcon,
-  Upload
+  Upload,
+  AlertTriangle,
+  Copy
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -63,6 +65,16 @@ import {
 } from 'recharts';
 import { Product, CartItem, Transaction, User } from './types';
 import { PRODUCTS, CATEGORIES } from './constants';
+import { supabaseService as firebaseService } from './services/supabaseService';
+import { supabase } from './lib/supabase';
+
+export function toast(message: string, type: 'success' | 'error' | 'info' = 'success') {
+  if (typeof window !== 'undefined' && (window as any).showToast) {
+    (window as any).showToast(message, type);
+  } else {
+    console.log(`[Toast Fallback - ${type}]: ${message}`);
+  }
+}
 
 const formatPrice = (price: number) => {
   return new Intl.NumberFormat('id-ID', {
@@ -383,6 +395,505 @@ const ReportsDashboard = ({ transactions }: { transactions: Transaction[] }) => 
   );
 };
 
+const UserManagementView = ({ onBack }: { onBack: () => void }) => {
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [isAdding, setIsAdding] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
+  const [pin, setPin] = useState('');
+  const [role, setRole] = useState<'admin' | 'kasir'>('kasir');
+
+  const fetchUsers = async () => {
+    setLoading(true);
+    try {
+      const data = await firebaseService.getUsers();
+      setUsers(data);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const handleCreate = async () => {
+    if (!name || !username || !pin) {
+      setErrorMsg('Semua data wajib diisi!');
+      return;
+    }
+    if (pin.length !== 6 || !/^\d+$/.test(pin)) {
+      setErrorMsg('PIN harus terdiri dari 6 digit angka!');
+      return;
+    }
+
+    try {
+      setErrorMsg('');
+      await firebaseService.createUser(username.toLowerCase(), pin, name, role);
+      setIsAdding(false);
+      resetForm();
+      fetchUsers();
+    } catch (e: any) {
+      setErrorMsg(e.message || 'Gagal menambahkan pengguna.');
+    }
+  };
+
+  const handleUpdate = async () => {
+    if (!editingUser) return;
+    if (!name || !username) {
+      setErrorMsg('Nama dan Username wajib diisi!');
+      return;
+    }
+    if (pin && (pin.length !== 6 || !/^\d+$/.test(pin))) {
+      setErrorMsg('PIN harus 6 digit angka!');
+      return;
+    }
+
+    try {
+      setErrorMsg('');
+      await firebaseService.updateUser({
+        id: editingUser.id,
+        name,
+        username: username.toLowerCase(),
+        role,
+        pin
+      });
+      setEditingUser(null);
+      resetForm();
+      fetchUsers();
+    } catch (e: any) {
+      setErrorMsg(e.message || 'Gagal mengubah pengguna.');
+    }
+  };
+
+  const handleDelete = async (user: User) => {
+    if (user.username === 'admin') {
+      toast('Akun administrator utama tidak dapat dihapus!', 'error');
+      return;
+    }
+    if (confirm(`Apakah Anda yakin ingin menghapus pengguna "${user.name}"?`)) {
+      try {
+        await firebaseService.deleteUser(user.id);
+        fetchUsers();
+        toast(`Pengguna "${user.name}" berhasil dihapus`, 'success');
+      } catch (e) {
+        toast('Gagal menghapus pengguna.', 'error');
+      }
+    }
+  };
+
+  const resetForm = () => {
+    setName('');
+    setUsername('');
+    setPin('');
+    setRole('kasir');
+    setErrorMsg('');
+  };
+
+  const startEdit = (user: User) => {
+    setEditingUser(user);
+    setName(user.name);
+    setUsername(user.username);
+    setRole(user.role);
+    setPin('');
+    setIsAdding(false);
+    setErrorMsg('');
+  };
+
+  const startAdd = () => {
+    resetForm();
+    setIsAdding(true);
+    setEditingUser(null);
+    setErrorMsg('');
+  };
+
+  return (
+    <div className="space-y-8 pb-10">
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+        <div>
+          <button 
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-2 text-bakery-muted hover:text-bakery-terracotta font-black text-[10px] uppercase tracking-widest transition-colors w-fit mb-2"
+          >
+            <ChevronLeft className="w-4 h-4" /> Kembali ke Panel
+          </button>
+          <h2 className="text-3xl font-serif font-black text-bakery-bark">Manajemen Kasir</h2>
+          <p className="text-bakery-muted text-xs font-bold uppercase tracking-widest mt-1">Kelola hak akses dan akun kasir toko</p>
+        </div>
+        <button 
+          onClick={startAdd}
+          className="px-6 py-3.5 rounded-2xl bg-bakery-terracotta text-white shadow-lg shadow-bakery-terracotta/20 font-black text-xs uppercase tracking-widest flex items-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-all self-end"
+        >
+          <Plus className="w-5 h-5" />
+          Tambah Kasir / Staff
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {loading ? (
+          <div className="col-span-full py-20 text-center text-bakery-muted font-bold">Memuat daftar kasir...</div>
+        ) : (
+          users.map(user => (
+            <div key={user.id} className="bg-white p-6 rounded-[32px] border border-bakery-tan/20 shadow-sm flex flex-col justify-between group hover:shadow-md transition-all">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-white ${user.role === 'admin' ? 'bg-bakery-bark' : 'bg-bakery-terracotta'}`}>
+                    <UserIcon className="w-5 h-5" />
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${
+                    user.role === 'admin' ? 'bg-bakery-bark/10 text-bakery-bark' : 'bg-bakery-terracotta/10 text-bakery-terracotta'
+                  }`}>
+                    {user.role}
+                  </span>
+                </div>
+                <h4 className="text-sm font-black text-bakery-bark uppercase tracking-tight">{user.name}</h4>
+                <p className="text-xs text-bakery-muted font-semibold mt-1">Username: @{user.username}</p>
+                <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider mt-2 flex items-center gap-1">
+                  <Lock className="w-3 h-3" /> PIN Aktif ({user.pin ? "Terdaftar" : "Belum Ditentukan"})
+                </p>
+              </div>
+
+              <div className="flex gap-2 border-t border-bakery-tan/15 pt-4 mt-6">
+                <button 
+                  onClick={() => startEdit(user)}
+                  className="flex-1 py-2.5 bg-bakery-cream hover:bg-bakery-tan/10 text-bakery-bark rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Pencil className="w-3.5 h-3.5" /> Edit
+                </button>
+                <button 
+                  disabled={user.username === 'admin'}
+                  onClick={() => handleDelete(user)}
+                  className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1.5 ${
+                    user.username === 'admin' 
+                      ? 'bg-stone-100 text-stone-300 cursor-not-allowed' 
+                      : 'bg-red-50 hover:bg-red-100 text-red-600'
+                  }`}
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Hapus
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <AnimatePresence>
+        {(isAdding || editingUser) && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-bakery-bark/60 backdrop-blur-md z-[110] flex items-center justify-center p-4 overflow-y-auto"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white w-full max-w-md rounded-[40px] overflow-hidden shadow-2xl flex flex-col max-h-[92vh]"
+            >
+              <div className="p-8 border-b border-bakery-tan/30 flex items-center justify-between">
+                <h3 className="text-xl font-serif font-black text-bakery-bark">
+                  {isAdding ? 'Tambah Staff Baru' : 'Edit Staff / Kasir'}
+                </h3>
+                <button 
+                  onClick={() => { setIsAdding(false); setEditingUser(null); }} 
+                  className="p-2 bg-bakery-cream rounded-2xl text-bakery-muted hover:text-bakery-bark transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-8 space-y-5 overflow-y-auto flex-1">
+                {errorMsg && (
+                  <div className="p-4 bg-red-50 border border-red-100 rounded-2xl flex gap-3 text-red-600 text-xs font-bold leading-relaxed">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{errorMsg}</span>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">Nama Lengkap</label>
+                  <input 
+                    type="text" 
+                    placeholder="Contoh: Budi Santoso"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full bg-bakery-cream/50 border-2 border-bakery-tan/20 rounded-2xl px-4 py-3 focus:border-bakery-terracotta outline-none font-bold text-bakery-bark transition-all text-sm"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">Username (Untuk Login)</label>
+                  <input 
+                    type="text" 
+                    placeholder="budis"
+                    disabled={editingUser?.username === 'admin'}
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
+                    className="w-full bg-bakery-cream/50 border-2 border-bakery-tan/20 rounded-2xl px-4 py-3 focus:border-bakery-terracotta outline-none font-bold text-bakery-bark transition-all text-sm disabled:opacity-50"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">PIN Rahasia (6 Digit Angka)</label>
+                  <input 
+                    type="password" 
+                    maxLength={6}
+                    placeholder={editingUser ? 'Kosongkan jika tidak ada perubahan PIN' : 'Masukkan 6 digit angka...'}
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+                    className="w-full bg-bakery-cream/50 border-2 border-bakery-tan/20 rounded-2xl px-4 py-3 focus:border-bakery-terracotta outline-none font-bold text-bakery-bark transition-all text-sm"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">Hak Akses / Peran</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { id: 'kasir', label: 'Kasir Toko', desc: 'Akses menu penjualan & sebatas laporan harian' },
+                      { id: 'admin', label: 'Administrator', desc: 'Akses penuh seluruh pengaturan & sistem database' }
+                    ].map(opt => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        disabled={editingUser?.username === 'admin' && opt.id !== 'admin'}
+                        onClick={() => setRole(opt.id as any)}
+                        className={`p-4 rounded-2xl border-2 text-left transition-all flex flex-col justify-between ${
+                          role === opt.id 
+                            ? 'border-bakery-terracotta bg-bakery-tan/10 text-bakery-bark shadow-sm' 
+                            : 'border-bakery-tan/20 text-bakery-muted hover:border-bakery-terracotta/30'
+                        } disabled:opacity-50`}
+                      >
+                        <span className="text-xs font-black uppercase tracking-wide">{opt.label}</span>
+                        <span className="text-[8px] font-bold opacity-60 leading-normal mt-1">{opt.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-8 bg-bakery-cream/30 border-t border-bakery-tan/30 flex gap-4">
+                <button 
+                  type="button"
+                  onClick={() => { setIsAdding(false); setEditingUser(null); }}
+                  className="flex-1 py-3.5 bg-white border border-bakery-tan/50 hover:bg-zinc-50 rounded-2xl font-black text-xs uppercase tracking-widest text-zinc-600 transition-colors"
+                >
+                  Batal
+                </button>
+                <button 
+                  type="button"
+                  onClick={isAdding ? handleCreate : handleUpdate}
+                  className="flex-1 py-3.5 bg-bakery-terracotta text-white font-black text-xs uppercase tracking-widest hover:bg-bakery-terracotta/90 transition-colors rounded-2xl shadow-lg shadow-bakery-terracotta/15"
+                >
+                  {isAdding ? 'Tambah' : 'Simpan'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+const WebsiteSettingsView = ({ 
+  config, 
+  setConfig, 
+  onBack 
+}: { 
+  config: any, 
+  setConfig: (c: any) => void, 
+  onBack: () => void 
+}) => {
+  const [localConfig, setLocalConfig] = useState({...config});
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await firebaseService.saveConfig(localConfig);
+      setConfig(localConfig);
+      setSaveSuccess(true);
+      toast("Pengaturan website berhasil disimpan!", "success");
+      setTimeout(() => setSaveSuccess(false), 2000);
+    } catch (err) {
+      toast("Gagal mengubah pengaturan website.", "error");
+    }
+  };
+
+  const setField = (field: string, value: any) => {
+    setLocalConfig((prev: any) => ({ ...prev, [field]: value }));
+  };
+
+  return (
+    <div className="space-y-8 pb-10">
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+        <div>
+          <button 
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-2 text-bakery-muted hover:text-bakery-terracotta font-black text-[10px] uppercase tracking-widest transition-colors w-fit mb-2"
+          >
+            <ChevronLeft className="w-4 h-4" /> Kembali ke Panel
+          </button>
+          <h2 className="text-3xl font-serif font-black text-bakery-bark">Manajemen Website</h2>
+          <p className="text-bakery-muted text-xs font-bold uppercase tracking-widest mt-1">Sesuaikan informasi toko dan preferensi situs</p>
+        </div>
+        {saveSuccess && (
+          <div className="px-4 py-2 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-full font-bold text-xs uppercase tracking-wider flex items-center gap-2 self-end">
+            <Check className="w-4 h-4" /> Disimpan!
+          </div>
+        )}
+      </div>
+
+      <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="bg-white p-8 md:p-10 rounded-[40px] border border-bakery-tan/30 shadow-sm space-y-6">
+          <h3 className="text-lg font-serif font-black text-bakery-bark flex items-center gap-3">
+            <Building2 className="w-6 h-6 text-bakery-terracotta" />
+            Profil Utama Website
+          </h3>
+
+          <div className="space-y-4">
+            <div className="flex flex-col items-center gap-4 py-4">
+              <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted w-full ml-1 text-center">Logo Utama Website (Gambar)</label>
+              <div 
+                onClick={() => document.getElementById('logo-upload-input-2')?.click()}
+                className="w-32 h-32 rounded-[32px] bg-bakery-cream/30 border-4 border-dashed border-bakery-tan/20 flex items-center justify-center relative overflow-hidden group cursor-pointer hover:border-bakery-terracotta/30 transition-all mx-auto"
+              >
+                {localConfig.logoUrl ? (
+                  <img src={localConfig.logoUrl} alt="Logo" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="flex flex-col items-center gap-2 text-bakery-muted group-hover:text-bakery-terracotta transition-colors">
+                    <Upload className="w-8 h-8" />
+                    <span className="text-[9px] font-black uppercase tracking-tighter">Upload Logo</span>
+                  </div>
+                )}
+                {localConfig.logoUrl && (
+                  <div className="absolute inset-0 bg-bakery-bark/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <p className="text-white font-black text-[10px] uppercase tracking-widest">Ganti Logo</p>
+                  </div>
+                )}
+              </div>
+              <input 
+                id="logo-upload-input-2"
+                type="file" 
+                hidden 
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                      setField('logoUrl', reader.result as string);
+                    };
+                    reader.readAsDataURL(file);
+                  }
+                }}
+              />
+              {localConfig.logoUrl && (
+                <button 
+                  type="button"
+                  onClick={() => setField('logoUrl', '')}
+                  className="text-[9px] font-black text-red-500 uppercase tracking-widest hover:text-red-600 transition-colors"
+                >
+                  Hapus Logo Gambar
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">Nama Brand / Toko</label>
+              <input 
+                type="text" 
+                value={localConfig.name}
+                onChange={(e) => setField('name', e.target.value)}
+                className="w-full bg-bakery-cream/50 border-2 border-bakery-tan/20 rounded-2xl px-4 py-3 focus:border-bakery-terracotta outline-none font-bold text-bakery-bark transition-all text-sm"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">Inisial Logo (Jika Logo Gambar Kosong)</label>
+              <input 
+                type="text" 
+                maxLength={2}
+                value={localConfig.logo}
+                onChange={(e) => setField('logo', e.target.value.toUpperCase())}
+                className="w-20 bg-bakery-cream/50 border-2 border-bakery-tan/20 rounded-2xl px-4 py-3 focus:border-bakery-terracotta outline-none font-bold text-center uppercase tracking-wider text-sm"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white p-8 md:p-10 rounded-[40px] border border-bakery-tan/30 shadow-sm space-y-6 flex flex-col justify-between">
+          <div className="space-y-6">
+            <h3 className="text-lg font-serif font-black text-bakery-bark flex items-center gap-3">
+              <Smartphone className="w-6 h-6 text-bakery-terracotta" />
+              Kontak & Atribut Website
+            </h3>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">Nomor Telepon / WhatsApp</label>
+                <input 
+                  type="text" 
+                  value={localConfig.phone || ''}
+                  onChange={(e) => setField('phone', e.target.value)}
+                  placeholder="Contoh: 0812-3456-7890"
+                  className="w-full bg-bakery-cream/50 border-2 border-bakery-tan/20 rounded-2xl px-4 py-3 focus:border-bakery-terracotta outline-none font-bold text-bakery-bark transition-all text-sm"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">Alamat Lengkap Toko / Kantor</label>
+                <textarea 
+                  value={localConfig.address}
+                  onChange={(e) => setField('address', e.target.value)}
+                  className="w-full bg-bakery-cream/50 border-2 border-bakery-tan/20 rounded-2xl px-4 py-3 focus:border-bakery-terracotta outline-none font-bold text-bakery-bark transition-all h-24 text-sm resize-none"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">Kode Warna Utama Brand</label>
+                <div className="flex gap-4">
+                  <input 
+                    type="color" 
+                    value={localConfig.primaryColor || '#C58F72'}
+                    onChange={(e) => setField('primaryColor', e.target.value)}
+                    className="w-12 h-12 bg-transparent border-0 cursor-pointer p-0 shrink-0"
+                  />
+                  <input 
+                    type="text" 
+                    maxLength={7}
+                    value={localConfig.primaryColor || '#C58F72'}
+                    onChange={(e) => setField('primaryColor', e.target.value)}
+                    className="w-full bg-bakery-cream/50 border-2 border-bakery-tan/20 rounded-2xl px-4 py-3 focus:border-bakery-terracotta outline-none font-bold uppercase text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-6 border-t border-bakery-tan/20">
+            <button 
+              type="submit"
+              className="w-full py-4 bg-bakery-terracotta hover:bg-bakery-terracotta/90 text-white font-black text-xs uppercase tracking-widest rounded-2xl shadow-lg shadow-bakery-terracotta/25 flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99] transition-all"
+            >
+              <Check className="w-5 h-5" /> Simpan Perubahan Website
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+};
+
 const SettingsView = ({ 
   config, 
   setConfig, 
@@ -395,20 +906,26 @@ const SettingsView = ({
   products,
   setProducts,
   categories,
-  setCategories
+  setCategories,
+  categoryDetails,
+  setCategoryDetails,
+  refreshCategories
 }: { 
   config: any, 
   setConfig: (c: any) => void,
   userRole: 'admin' | 'kasir',
   setView: (v: any) => void,
-  activeSection: 'general' | 'reports' | 'history' | 'catalog',
-  setActiveSection: (s: 'general' | 'reports' | 'history' | 'catalog') => void,
+  activeSection: 'general' | 'reports' | 'history' | 'catalog' | 'kasir' | 'website',
+  setActiveSection: (s: 'general' | 'reports' | 'history' | 'catalog' | 'kasir' | 'website') => void,
   transactions: Transaction[],
   setCurrentUser: (u: User | null) => void,
   products: Product[],
   setProducts: (p: Product[]) => void,
   categories: string[],
-  setCategories: (c: string[]) => void
+  setCategories: (c: string[]) => void,
+  categoryDetails: Record<string, { description: string, image: string, color: string }>,
+  setCategoryDetails: (d: Record<string, { description: string, image: string, color: string }>) => void,
+  refreshCategories: () => void
 }) => {
   const handleLogout = () => {
     setCurrentUser(null);
@@ -436,7 +953,26 @@ const SettingsView = ({
         setProducts={setProducts}
         categories={categories}
         setCategories={setCategories}
+        categoryDetails={categoryDetails}
+        setCategoryDetails={setCategoryDetails}
+        refreshCategories={refreshCategories}
         onBack={() => setActiveSection('general')}
+      />
+    );
+  }
+
+  if (activeSection === 'kasir') {
+    return (
+      <UserManagementView onBack={() => setActiveSection('general')} />
+    );
+  }
+
+  if (activeSection === 'website') {
+    return (
+      <WebsiteSettingsView 
+        config={config} 
+        setConfig={setConfig} 
+        onBack={() => setActiveSection('general')} 
       />
     );
   }
@@ -446,7 +982,7 @@ const SettingsView = ({
       <div className="flex flex-col md:flex-row justify-between md:items-end gap-4">
         <div>
           <h2 className="text-3xl font-serif font-black text-bakery-bark">Panel Administrator</h2>
-          <p className="text-bakery-muted text-xs font-bold uppercase tracking-widest mt-1">Kelola sistem dan pantau performa bisnis</p>
+          <p className="text-bakery-muted text-xs font-bold uppercase tracking-widest mt-1">Kelola sistem, kasir, produk, dan performa bisnis</p>
         </div>
         <div className="flex gap-3">
           {userRole === 'admin' && (
@@ -461,166 +997,96 @@ const SettingsView = ({
         </div>
       </div>
 
-      {/* Admin Dashboard Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      {/* Admin Dashboard Cards - Clean & Functional Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
         <button 
           onClick={() => { setView('reports'); if (userRole === 'admin') setActiveSection('reports'); }}
-          className="bg-white p-8 rounded-[40px] border border-bakery-tan/30 shadow-sm hover:shadow-md transition-all text-left group"
+          className="bg-white p-6 md:p-8 rounded-[40px] border border-bakery-tan/30 shadow-sm hover:shadow-md transition-all text-left group flex flex-col justify-between min-h-[180px]"
         >
-          <div className="w-14 h-14 bg-bakery-cream rounded-2xl flex items-center justify-center text-bakery-terracotta mb-6 group-hover:scale-110 transition-transform">
-            <BarChart3 className="w-7 h-7" />
+          <div className="w-12 h-12 md:w-14 md:h-14 bg-bakery-cream rounded-2xl flex items-center justify-center text-bakery-terracotta group-hover:scale-110 transition-transform">
+            <BarChart3 className="w-6 h-6 md:w-7 md:h-7" />
           </div>
-          <h4 className="text-sm font-black text-bakery-bark uppercase tracking-widest">Laporan Penjualan</h4>
-          <p className="text-[10px] text-bakery-muted font-bold mt-1 uppercase">Analisa pendapatan & performa produk</p>
+          <div>
+            <h4 className="text-xs md:text-sm font-black text-bakery-bark uppercase tracking-widest leading-snug">Laporan Penjualan</h4>
+            <p className="text-[9px] md:text-[10px] text-bakery-muted font-bold mt-1 uppercase">Analisa pendapatan & performa produk</p>
+          </div>
+        </button>
+
+        <button 
+          onClick={() => { setView('history'); }}
+          className="bg-white p-6 md:p-8 rounded-[40px] border border-bakery-tan/30 shadow-sm hover:shadow-md transition-all text-left group flex flex-col justify-between min-h-[180px]"
+        >
+          <div className="w-12 h-12 md:w-14 md:h-14 bg-bakery-cream rounded-2xl flex items-center justify-center text-bakery-terracotta group-hover:scale-110 transition-transform">
+            <History className="w-6 h-6 md:w-7 md:h-7" />
+          </div>
+          <div>
+            <h4 className="text-xs md:text-sm font-black text-bakery-bark uppercase tracking-widest leading-snug">Riwayat Transaksi</h4>
+            <p className="text-[9px] md:text-[10px] text-bakery-muted font-bold mt-1 uppercase">Monitor, edit, & hapus transaksi</p>
+          </div>
         </button>
 
         <button 
           onClick={() => { if (userRole === 'admin') setActiveSection('catalog'); }}
-          className="bg-white p-8 rounded-[40px] border border-bakery-tan/30 shadow-sm hover:shadow-md transition-all text-left group"
+          className="bg-white p-6 md:p-8 rounded-[40px] border border-bakery-tan/30 shadow-sm hover:shadow-md transition-all text-left group flex flex-col justify-between min-h-[180px]"
         >
-          <div className="w-14 h-14 bg-bakery-cream rounded-2xl flex items-center justify-center text-bakery-terracotta mb-6 group-hover:scale-110 transition-transform">
-            <Package className="w-7 h-7" />
+          <div className="w-12 h-12 md:w-14 md:h-14 bg-bakery-cream rounded-2xl flex items-center justify-center text-bakery-terracotta group-hover:scale-110 transition-transform">
+            <Package className="w-6 h-6 md:w-7 md:h-7" />
           </div>
-          <h4 className="text-sm font-black text-bakery-bark uppercase tracking-widest">Kelola Katalog</h4>
-          <p className="text-[10px] text-bakery-muted font-bold mt-1 uppercase">CRUD Produk & Kategori</p>
+          <div>
+            <h4 className="text-xs md:text-sm font-black text-bakery-bark uppercase tracking-widest leading-snug">Manajemen Produk</h4>
+            <p className="text-[9px] md:text-[10px] text-bakery-muted font-bold mt-1 uppercase">Kelola produk & kategori penjualan</p>
+          </div>
         </button>
 
-        <div className="bg-bakery-bark p-8 rounded-[40px] shadow-lg flex items-center justify-between text-white relative overflow-hidden group">
+        <button 
+          onClick={() => { if (userRole === 'admin') setActiveSection('kasir'); }}
+          className="bg-white p-6 md:p-8 rounded-[40px] border border-bakery-tan/30 shadow-sm hover:shadow-md transition-all text-left group flex flex-col justify-between min-h-[180px]"
+        >
+          <div className="w-12 h-12 md:w-14 md:h-14 bg-bakery-cream rounded-2xl flex items-center justify-center text-bakery-terracotta group-hover:scale-110 transition-transform">
+            <Users className="w-6 h-6 md:w-7 md:h-7" />
+          </div>
+          <div>
+            <h4 className="text-xs md:text-sm font-black text-bakery-bark uppercase tracking-widest leading-snug">Manajemen Kasir</h4>
+            <p className="text-[9px] md:text-[10px] text-bakery-muted font-bold mt-1 uppercase">Atur hak akses & akun staff</p>
+          </div>
+        </button>
+
+        <button 
+          onClick={() => { if (userRole === 'admin') setActiveSection('website'); }}
+          className="bg-white p-6 md:p-8 rounded-[40px] border border-bakery-tan/30 shadow-sm hover:shadow-md transition-all text-left group flex flex-col justify-between min-h-[180px]"
+        >
+          <div className="w-12 h-12 md:w-14 md:h-14 bg-bakery-cream rounded-2xl flex items-center justify-center text-bakery-terracotta group-hover:scale-110 transition-transform">
+            <Settings className="w-6 h-6 md:w-7 md:h-7" />
+          </div>
+          <div>
+            <h4 className="text-xs md:text-sm font-black text-bakery-bark uppercase tracking-widest leading-snug">Manajemen Website</h4>
+            <p className="text-[9px] md:text-[10px] text-bakery-muted font-bold mt-1 uppercase">Atur profil brand & kontak toko</p>
+          </div>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8 pt-4">
+        <div className="bg-bakery-bark p-8 rounded-[40px] shadow-lg flex items-center justify-between text-white relative overflow-hidden group min-h-[140px]">
           <div className="relative z-10">
             <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-2">Total Transaksi</p>
-            <h4 className="text-3xl font-black">{transactions.length}</h4>
+            <h3 className="text-4xl font-black font-serif">{transactions.length}</h3>
             <div className="mt-4 flex items-center gap-2">
               <span className="text-[10px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full font-black">+12%</span>
               <span className="text-[10px] opacity-40 font-bold uppercase">Bulan ini</span>
             </div>
           </div>
-          <TrendingUp className="w-20 h-20 absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform" />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8 pt-4">
-        <div className="bg-white p-6 md:p-8 lg:p-10 rounded-[40px] md:rounded-[48px] border border-bakery-tan/30 shadow-sm space-y-6 md:space-y-8">
-          <h3 className="text-lg font-serif font-black text-bakery-bark flex items-center gap-3">
-            <Building2 className="w-6 h-6 text-bakery-terracotta" />
-            Profil Toko
-          </h3>
-          
-          <div className="space-y-4 md:space-y-6">
-            <div className="flex flex-col items-center gap-4 py-4">
-              <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted w-full ml-1">Logo Toko (Gambar)</label>
-              <div 
-                onClick={() => document.getElementById('logo-upload-input')?.click()}
-                className="w-32 h-32 rounded-[32px] bg-bakery-cream/30 border-4 border-dashed border-bakery-tan/20 flex items-center justify-center relative overflow-hidden group cursor-pointer hover:border-bakery-terracotta/30 transition-all"
-              >
-                {config.logoUrl ? (
-                  <img src={config.logoUrl} alt="Logo" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="flex flex-col items-center gap-2 text-bakery-muted group-hover:text-bakery-terracotta transition-colors">
-                    <Upload className="w-8 h-8" />
-                    <span className="text-[9px] font-black uppercase tracking-tighter">Upload Logo</span>
-                  </div>
-                )}
-                {config.logoUrl && (
-                  <div className="absolute inset-0 bg-bakery-bark/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <p className="text-white font-black text-[10px] uppercase tracking-widest">Ganti Logo</p>
-                  </div>
-                )}
-              </div>
-              <input 
-                id="logo-upload-input"
-                type="file" 
-                hidden 
-                accept="image/*"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                      setConfig({ ...config, logoUrl: reader.result as string });
-                    };
-                    reader.readAsDataURL(file);
-                  }
-                }}
-              />
-              {config.logoUrl && (
-                <button 
-                  onClick={() => setConfig({ ...config, logoUrl: '' })}
-                  className="text-[9px] font-black text-red-500 uppercase tracking-widest hover:text-red-600 transition-colors"
-                >
-                  Hapus Logo Gambar
-                </button>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">Nama Toko</label>
-              <input 
-                type="text" 
-                value={config.name}
-                onChange={(e) => setConfig({ ...config, name: e.target.value })}
-                className="w-full bg-bakery-cream/50 border-2 border-bakery-tan/20 rounded-2xl px-4 py-3 md:px-5 md:py-4 focus:border-bakery-terracotta outline-none font-bold text-bakery-bark transition-all"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">Logo Inisial (Tampil jika gambar kosong)</label>
-              <input 
-                type="text" 
-                maxLength={2}
-                value={config.logo}
-                onChange={(e) => setConfig({ ...config, logo: e.target.value.toUpperCase() })}
-                className="w-16 md:w-20 bg-bakery-cream/50 border-2 border-bakery-tan/20 rounded-2xl px-4 py-3 md:px-5 md:py-4 focus:border-bakery-terracotta outline-none font-bold text-bakery-bark transition-all text-center uppercase"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">Alamat Lengkap</label>
-              <textarea 
-                value={config.address}
-                onChange={(e) => setConfig({ ...config, address: e.target.value })}
-                className="w-full bg-bakery-cream/50 border-2 border-bakery-tan/20 rounded-2xl px-4 py-3 md:px-5 md:py-4 focus:border-bakery-terracotta outline-none font-bold text-bakery-bark transition-all h-28 md:h-32"
-              />
-            </div>
-          </div>
+          <TrendingUp className="w-24 h-24 absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform" />
         </div>
 
-        <div className="bg-white p-6 md:p-8 lg:p-10 rounded-[40px] md:rounded-[48px] border border-bakery-tan/30 shadow-sm space-y-6 md:space-y-8">
-          <h3 className="text-lg font-serif font-black text-bakery-bark flex items-center gap-3">
-            <Settings className="w-6 h-6 text-bakery-terracotta" />
-            Preferensi Fitur
-          </h3>
-          
-          <div className="grid grid-cols-1 gap-4">
-            <div className="flex items-center justify-between p-5 md:p-6 rounded-3xl bg-bakery-cream/30 border border-bakery-tan/20">
-              <div className="flex items-center gap-3 md:gap-4">
-                <div className="w-10 h-10 md:w-12 md:h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center text-bakery-terracotta shrink-0">
-                  <BarChart3 className="w-5 h-5 md:w-6 md:h-6" />
-                </div>
-                <div>
-                  <h5 className="text-xs md:text-sm font-black text-bakery-bark uppercase">Laporan Penjualan</h5>
-                  <p className="text-[10px] text-bakery-muted font-bold">Akses untuk kasir & admin</p>
-                </div>
-              </div>
-              <div className="w-10 h-5 md:w-12 md:h-6 bg-green-500 rounded-full relative shrink-0">
-                <div className="absolute right-1 top-0.5 w-4 h-4 bg-white rounded-full transition-all"></div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between p-5 md:p-6 rounded-3xl bg-bakery-cream/30 border border-bakery-tan/20">
-              <div className="flex items-center gap-3 md:gap-4">
-                <div className="w-10 h-10 md:w-12 md:h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center text-bakery-terracotta shrink-0">
-                  <History className="w-5 h-5 md:w-6 md:h-6" />
-                </div>
-                <div>
-                  <h5 className="text-xs md:text-sm font-black text-bakery-bark uppercase">Riwayat Transaksi</h5>
-                  <p className="text-[10px] text-bakery-muted font-bold">Pengecekan nota penjualan</p>
-                </div>
-              </div>
-              <div className="w-10 h-5 md:w-12 md:h-6 bg-green-500 rounded-full relative shrink-0">
-                <div className="absolute right-1 top-0.5 w-4 h-4 bg-white rounded-full transition-all"></div>
-              </div>
-            </div>
+        <div className="bg-white p-8 rounded-[40px] border border-bakery-tan/30 shadow-sm flex items-center justify-between min-h-[140px]">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-bakery-muted mb-2">Pendapatan Total bruto</p>
+            <h3 className="text-3xl font-black font-serif text-bakery-bark">
+              {formatPrice(transactions.reduce((sum, t) => sum + (t.total || 0), 0))}
+            </h3>
+            <p className="text-[9px] text-bakery-muted font-bold uppercase mt-2">Semua Transaksi Tercatat</p>
           </div>
+          <DollarSign className="w-12 h-12 text-bakery-terracotta/30" />
         </div>
       </div>
     </div>
@@ -776,12 +1242,18 @@ const CatalogView = ({
   setProducts, 
   categories, 
   setCategories,
+  categoryDetails,
+  setCategoryDetails,
+  refreshCategories,
   onBack
 }: { 
   products: Product[], 
   setProducts: (p: Product[]) => void,
   categories: string[],
   setCategories: (c: string[]) => void,
+  categoryDetails: Record<string, { description: string, image: string, color: string }>,
+  setCategoryDetails: (d: Record<string, { description: string, image: string, color: string }>) => void,
+  refreshCategories: () => void,
   onBack: () => void
 }) => {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -789,64 +1261,89 @@ const CatalogView = ({
   const [isManagingCategories, setIsManagingCategories] = useState(false);
   const [newCategory, setNewCategory] = useState('');
 
-  const handleDeleteProduct = (id: string) => {
+  // Category Edit details states
+  const [editingCategoryName, setEditingCategoryName] = useState<string | null>(null);
+  const [categoryDescription, setCategoryDescription] = useState('');
+  const [categoryImage, setCategoryImage] = useState('');
+  const [categoryColor, setCategoryColor] = useState('from-yellow-400/10 to-orange-500/10');
+
+  const handleDeleteProduct = async (id: string) => {
     if (confirm('Hapus produk ini?')) {
-      setProducts(products.filter(p => p.id !== id));
+      try {
+        await firebaseService.deleteProduct(id);
+        toast("Produk berhasil dihapus", "success");
+      } catch (err) {
+        toast("Gagal menghapus produk.", "error");
+      }
     }
   };
 
-  const handleSaveProduct = (product: Product) => {
-    if (isAddingProduct) {
-      setProducts([...products, product]);
-    } else {
-      setProducts(products.map(p => p.id === product.id ? product : p));
+  const handleSaveProduct = async (product: Product) => {
+    try {
+      await firebaseService.saveProduct(product);
+      setEditingProduct(null);
+      setIsAddingProduct(false);
+      toast("Produk berhasil disimpan!", "success");
+    } catch (err) {
+      toast("Gagal menyimpan produk.", "error");
     }
-    setEditingProduct(null);
-    setIsAddingProduct(false);
   };
 
-  const handleDeleteCategory = (cat: string) => {
+  const handleDeleteCategory = async (cat: string) => {
     if (cat === 'Semua') return;
     if (products.some(p => p.category === cat)) {
-      alert('Kategori ini masih digunakan oleh beberapa produk. Silakan ubah kategori produk tersebut terlebih dahulu.');
+      toast('Kategori ini masih digunakan oleh beberapa produk. Silakan ubah kategori produk tersebut terlebih dahulu.', 'error');
       return;
     }
     if (confirm(`Hapus kategori "${cat}"?`)) {
-      setCategories(categories.filter(c => c !== cat));
+      try {
+        await firebaseService.deleteCategory(cat);
+        if (editingCategoryName === cat) setEditingCategoryName(null);
+        refreshCategories();
+        toast(`Kategori "${cat}" berhasil dihapus`, 'success');
+      } catch (err) {
+        toast("Gagal menghapus kategori.", "error");
+      }
     }
   };
 
-  const handleAddCategory = () => {
+  const handleAddCategory = async () => {
     if (newCategory.trim() && !categories.includes(newCategory.trim())) {
-      setCategories([...categories, newCategory.trim()]);
-      setNewCategory('');
+      try {
+        await firebaseService.saveCategory(newCategory.trim());
+        refreshCategories();
+        toast(`Kategori "${newCategory.trim()}" berhasil ditambahkan!`, 'success');
+        setNewCategory('');
+      } catch (err) {
+        toast("Gagal menambah kategori.", "error");
+      }
     }
   };
 
   return (
     <div className="space-y-8 pb-10">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <button 
           onClick={onBack}
-          className="flex items-center gap-2 text-bakery-muted hover:text-bakery-terracotta font-black text-[10px] uppercase tracking-widest transition-colors"
+          className="flex items-center gap-2 text-bakery-muted hover:text-bakery-terracotta font-black text-[10px] uppercase tracking-widest transition-colors w-fit"
         >
-          <ChevronLeft className="w-4 h-4" /> Kembali ke Dashboard
+          <ChevronLeft className="w-4 h-4" /> Kembali ke Panel
         </button>
-        <div className="flex gap-3">
+        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
           <button 
             onClick={() => setIsManagingCategories(!isManagingCategories)}
-            className={`px-6 py-3 rounded-2xl border-2 transition-all font-black text-xs uppercase tracking-widest flex items-center gap-3 ${
+            className={`px-4 sm:px-6 py-3.5 rounded-2xl border-2 transition-all font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 ${
               isManagingCategories ? 'bg-bakery-bark text-white border-bakery-bark' : 'bg-white text-bakery-bark border-bakery-tan/30'
             }`}
           >
-            <Tag className="w-5 h-5" />
+            <Tag className="w-4 h-4 sm:w-5 sm:h-5" />
             Kelola Kategori
           </button>
           <button 
             onClick={() => { setIsAddingProduct(true); setEditingProduct({ id: Date.now().toString(), name: '', price: 0, category: categories[1] || '', description: '', image: '' }); }}
-            className="px-6 py-3 rounded-2xl bg-bakery-terracotta text-white shadow-lg shadow-bakery-terracotta/20 font-black text-xs uppercase tracking-widest flex items-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-all"
+            className="px-4 sm:px-6 py-3.5 rounded-2xl bg-bakery-terracotta text-white shadow-lg shadow-bakery-terracotta/20 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 hover:scale-[1.02] active:scale-[0.98] transition-all"
           >
-            <Plus className="w-5 h-5" />
+            <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
             Tambah Produk
           </button>
         </div>
@@ -877,18 +1374,158 @@ const CatalogView = ({
                   Tambah
                 </button>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {categories.map(cat => (
-                  <div key={cat} className="flex items-center justify-between p-4 bg-bakery-cream/30 rounded-2xl border border-bakery-tan/10">
-                    <span className="text-xs font-black text-bakery-bark uppercase">{cat}</span>
-                    {cat !== 'Semua' && (
-                      <button onClick={() => handleDeleteCategory(cat)} className="text-red-400 hover:text-red-600">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                ))}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mt-6">
+                {categories.map(cat => {
+                  const details = categoryDetails[cat] || { description: '', image: '', color: 'from-amber-400/10 to-stone-500/10' };
+                  return (
+                    <div key={cat} className="flex flex-col p-4 bg-bakery-cream/30 rounded-2xl border border-bakery-tan/10 relative hover:border-bakery-tan/50 transition-all">
+                      <div className="flex items-center justify-between font-serif mb-2 pb-2 border-b border-bakery-tan/10">
+                        <span className="text-xs font-black text-bakery-bark uppercase">{cat}</span>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => {
+                              setEditingCategoryName(cat);
+                              setCategoryDescription(details.description);
+                              setCategoryImage(details.image);
+                              setCategoryColor(details.color || 'from-yellow-400/10 to-orange-500/10');
+                            }}
+                            className="p-1 px-2 bg-bakery-cream hover:bg-bakery-tan/20 text-bakery-bark rounded-lg text-[9px] font-black transition-colors"
+                            title="Edit Detail Kategori"
+                          >
+                            Edit
+                          </button>
+                          {cat !== 'Semua' && (
+                            <button onClick={() => handleDeleteCategory(cat)} className="text-red-400 hover:text-red-600 p-1" title="Hapus Kategori">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-[10px] font-semibold text-bakery-bark/70 line-clamp-2 min-h-[2.5rem]">
+                        {details.description || <span className="opacity-40 italic">Belum ada deskripsi</span>}
+                      </div>
+                      {details.image && (
+                        <img 
+                          src={details.image} 
+                          alt="" 
+                          className="w-full h-16 object-cover rounded-lg border border-bakery-tan/20 mt-2" 
+                          referrerPolicy="no-referrer"
+                        />
+                      )}
+                    </div>
+                  );
+                })}
               </div>
+
+              {editingCategoryName && (
+                <div className="p-6 bg-bakery-cream/40 rounded-3xl border-2 border-bakery-tan/20 space-y-4 mt-6">
+                  <div className="flex justify-between items-center">
+                    <h4 className="text-xs font-black text-bakery-bark uppercase tracking-widest">
+                      Edit Detail Kategori: {editingCategoryName}
+                    </h4>
+                    <button 
+                      onClick={() => setEditingCategoryName(null)}
+                      className="text-xs font-bold text-bakery-muted hover:text-bakery-bark transition-colors"
+                    >
+                      Batal
+                    </button>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">
+                        Deskripsi Kategori
+                      </label>
+                      <textarea
+                        value={categoryDescription}
+                        onChange={(e) => setCategoryDescription(e.target.value)}
+                        placeholder="Masukkan deskripsi untuk kategori ini..."
+                        className="w-full bg-white border-2 border-bakery-tan/20 rounded-2xl px-5 py-3 focus:border-bakery-terracotta outline-none font-bold text-bakery-bark text-xs min-h-[80px]"
+                      />
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">
+                          URL Gambar Kategori
+                        </label>
+                        <input
+                          type="text"
+                          value={categoryImage.startsWith('data:') ? '' : categoryImage}
+                          onChange={(e) => setCategoryImage(e.target.value)}
+                          placeholder="Atau tempel URL gambar Unsplash..."
+                          className="w-full bg-white border-2 border-bakery-tan/20 rounded-2xl px-5 py-3 focus:border-bakery-terracotta outline-none font-semibold text-bakery-bark text-xs"
+                        />
+                        <div className="mt-2">
+                          <span className="text-[9px] font-bold text-bakery-muted">Atau Unggah Gambar:</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  if (typeof reader.result === 'string') {
+                                    setCategoryImage(reader.result);
+                                  }
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                            className="block w-full text-xs text-bakery-muted file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-[10px] file:font-black file:uppercase file:tracking-wider file:bg-bakery-bark file:text-white file:hover:bg-bakery-terracotta pointer mt-1"
+                          />
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">
+                          Warna Tema (Gradient)
+                        </label>
+                        <select
+                          value={categoryColor}
+                          onChange={(e) => setCategoryColor(e.target.value)}
+                          className="w-full bg-white border-2 border-bakery-tan/20 rounded-2xl px-5 py-3 focus:border-bakery-terracotta outline-none font-bold text-bakery-bark text-xs"
+                        >
+                          <option value="from-yellow-400/10 to-orange-500/10">Kuning-Oranye (Bolen Pisang)</option>
+                          <option value="from-purple-400/10 to-pink-500/10">Ungu-Merah Muda (Bolen Spesial)</option>
+                          <option value="from-amber-400/10 to-stone-500/10">Cokelat-Abu (Roti & Snack)</option>
+                          <option value="from-red-400/10 to-rose-500/10">Merah-Mawar (Paket Box)</option>
+                          <option value="from-blue-400/10 to-cyan-500/10">Biru-Sian (Minuman)</option>
+                          <option value="from-green-400/10 to-emerald-500/10">Hijau (Spesial Sehat)</option>
+                        </select>
+                        <div className="mt-2 flex items-center gap-3">
+                          <span className="text-[9px] font-bold text-bakery-muted">Pratinjau Warna:</span>
+                          <div className={`w-20 h-8 rounded-lg bg-gradient-to-br ${categoryColor} border border-bakery-tan/20 flex items-center justify-center`}>
+                            <span className="text-[9px] font-bold text-bakery-bark text-center">Tampilan</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <button 
+                      onClick={async () => {
+                        try {
+                          await firebaseService.saveCategoryWithDetails({
+                            name: editingCategoryName,
+                            description: categoryDescription,
+                            image: categoryImage,
+                            color: categoryColor
+                          });
+                          toast(`Detail kategori "${editingCategoryName}" berhasil diperbarui!`, 'success');
+                          setEditingCategoryName(null);
+                          refreshCategories();
+                        } catch (e) {
+                          toast("Gagal menyimpan detail kategori.", "error");
+                        }
+                      }}
+                      className="w-full py-3 bg-bakery-terracotta text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:scale-[1.01] active:scale-[0.99] transition-all shadow-md shadow-bakery-terracotta/10"
+                    >
+                      Simpan Perubahan Detail
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -1099,25 +1736,257 @@ const ProductEditModal = ({ product, categories, onSave, onClose }: {
   );
 };
 
+const SETUP_SQL = `-- 1. Buat Tabel-tabel (Bila Belum Ada)
+CREATE TABLE IF NOT EXISTS public.users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    pin TEXT NOT NULL,
+    name TEXT NOT NULL,
+    role TEXT CHECK (role IN ('admin', 'kasir')) NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.products (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    price NUMERIC NOT NULL,
+    category TEXT NOT NULL,
+    image TEXT,
+    description TEXT
+);
+
+CREATE TABLE IF NOT EXISTS public.transactions (
+    id TEXT PRIMARY KEY,
+    items JSONB NOT NULL,
+    total NUMERIC NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    "paymentMethod" TEXT CHECK ("paymentMethod" IN ('cash', 'e-wallet', 'card')) NOT NULL,
+    "editLogs" JSONB DEFAULT '[]'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS public."systemConfigs" (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    logo TEXT,
+    "logoUrl" TEXT,
+    address TEXT,
+    phone TEXT,
+    "primaryColor" TEXT
+);
+
+CREATE TABLE IF NOT EXISTS public.categories (
+    name TEXT PRIMARY KEY,
+    description TEXT,
+    image TEXT,
+    color TEXT
+);
+
+-- 2. Nonaktifkan RLS (Row Level Security) Agar Browser Bisa Membaca & Menulis Secara Anonim
+ALTER TABLE IF EXISTS public.users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.products DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.transactions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public."systemConfigs" DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.categories DISABLE ROW LEVEL SECURITY;
+
+-- 3. Masukkan Data Bawaan Awal (Default Seeds)
+INSERT INTO public.users (id, username, pin, name, role) VALUES
+('b8764b8e-324c-473d-8ab1-24fbce828a25', 'admin', '123456', 'Administrator', 'admin'),
+('c3894b9e-524c-473d-8ab1-24fbce828a26', 'kasir', '000000', 'Kasir Toko', 'kasir')
+ON CONFLICT (username) DO UPDATE SET pin = EXCLUDED.pin, name = EXCLUDED.name, role = EXCLUDED.role;
+
+INSERT INTO public.categories (name, description, image, color) VALUES
+('Semua', 'Semua menu lezat dan premium pilihan terbaik untuk Anda.', '', ''),
+('Bolen Pisang', 'Varian bolen pisang klasik dengan pisang pilihan dan adonan pastry berlapis yang renyah.', 'https://images.unsplash.com/photo-1621236304845-8d13ed539370?q=80&w=800&auto=format&fit=crop', 'from-yellow-400/10 to-orange-500/10'),
+('Bolen Spesial', 'Inovasi rasa unik dan premium untuk pengalaman menikmati bolen yang berbeda dari biasanya.', 'https://images.unsplash.com/photo-1548364538-60b952c308b9?q=80&w=800&auto=format&fit=crop', 'from-purple-400/10 to-pink-500/10'),
+('Roti & Snack', 'Pilihan roti lembut dan camilan gurih yang cocok untuk menemani waktu santai Anda.', 'https://images.unsplash.com/photo-1509440159596-0249088772ff?q=80&w=800&auto=format&fit=crop', 'from-amber-400/10 to-stone-500/10'),
+('Paket Box', 'Kemasan eksklusif yang pas untuk dikirimkan sebagai hadiah atau oleh-oleh spesial.', 'https://images.unsplash.com/photo-1513201099705-a9746e1e201f?q=80&w=800&auto=format&fit=crop', 'from-red-400/10 to-rose-500/10'),
+('Minuman', 'Minuman segar pilihan sebagai pendamping makan bolen lumer yang lezat.', 'https://images.unsplash.com/photo-1541167760496-162955ed8a9f?q=80&w=800&auto=format&fit=crop', 'from-blue-400/10 to-cyan-500/10')
+ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description, image = EXCLUDED.image, color = EXCLUDED.color;
+
+INSERT INTO public."systemConfigs" (id, name, logo, "logoUrl", address, phone, "primaryColor") VALUES
+('default', 'BroBread', 'B', '', 'Jl. Raya No. 123, Purwokerto', '0812-3456-7890', '#C58F72')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.products (id, name, price, category, description, image) VALUES
+('b1', 'Bolen Pisang Keju', 35000, 'Bolen Pisang', 'Pastry renyah dengan isian pisang raja manis dan potongan keju gurih.', 'https://images.unsplash.com/photo-1621236304845-8d13ed539370?q=80&w=400&h=400&auto=format&fit=crop'),
+('b2', 'Bolen Pisang Cokelat', 35000, 'Bolen Pisang', 'Perpaduan sempurna pisang manis dan cokelat lumer berkualitas.', 'https://images.unsplash.com/photo-1600431521340-491eca880813?q=80&w=400&h=400&auto=format&fit=crop'),
+('b3', 'Bolen Pisang Cokelat Keju', 38000, 'Bolen Pisang', 'Kombinasi lengkap cokelat lumer dan keju parut di dalam satu lapis bolen.', 'https://images.unsplash.com/photo-1555507036-ab10bc72b243?q=80&w=400&h=400&auto=format&fit=crop'),
+('s1', 'Bolen Durian King', 48000, 'Bolen Spesial', 'Edisi premium dengan isian durian montong asli yang legit dan harum.', 'https://images.unsplash.com/photo-1548364538-60b952c308b9?q=80&w=400&h=400&auto=format&fit=crop'),
+('s2', 'Bolen Tape Ketan', 32000, 'Bolen Spesial', 'Isian tape pilihan dengan paduan ketan hitam yang unik dan legit.', 'https://images.unsplash.com/photo-1558961359-1d99283f085c?q=80&w=400&h=400&auto=format&fit=crop'),
+('s3', 'Bolen Nanas Madu', 32000, 'Bolen Spesial', 'Isian selai nanas madu buatan sendiri yang segar dan manis alami.', 'https://images.unsplash.com/photo-1551024601-bec78aea704b?q=80&w=400&h=400&auto=format&fit=crop'),
+('r1', 'Roti Keset Susu', 25000, 'Roti & Snack', 'Roti sobek super lembut dengan olesan susu dan mentega premium.', 'https://images.unsplash.com/photo-1509440159596-0249088772ff?q=80&w=400&h=400&auto=format&fit=crop'),
+('r2', 'Brownies Panggang', 45000, 'Roti & Snack', 'Brownies cokelat padat dengan crust yang shiny dan topping almond.', 'https://images.unsplash.com/photo-1464347719102-1c5137ad6bad?q=80&w=400&h=400&auto=format&fit=crop'),
+('p1', 'Hantaran Box (Isi 10)', 68000, 'Paket Box', 'Box eksklusif berisi 10 bolen campur, cocok untuk buah tangan.', 'https://images.unsplash.com/photo-1513201099705-a9746e1e201f?q=80&w=400&h=400&auto=format&fit=crop'),
+('p2', 'Family Pack (Isi 20)', 125000, 'Paket Box', 'Paket besar lebih hemat untuk dinikmati bersama seluruh anggota keluarga.', 'https://images.unsplash.com/photo-1542826438-bd32f43d626f?q=80&w=400&h=400&auto=format&fit=crop'),
+('m1', 'Es Kopi Susu Mantap', 18000, 'Minuman', 'Kopi susu gula aren andalan pendamping makan bolen.', 'https://images.unsplash.com/photo-1541167760496-162955ed8a9f?q=80&w=400&h=400&auto=format&fit=crop'),
+('m2', 'Thai Tea Special', 15000, 'Minuman', 'Teh Thailand autentik dengan susu evaporasi yang creamy.', 'https://images.unsplash.com/photo-1558961359-1d99283f085c?q=80&w=400&h=400&auto=format&fit=crop')
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, price = EXCLUDED.price, category = EXCLUDED.category, description = EXCLUDED.description, image = EXCLUDED.image;`;
+
 const LoginView = ({ onLogin, config }: { onLogin: (user: User) => void, config: any }) => {
   const [username, setUsername] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [status, setStatus] = useState('');
+  const [dbSetupError, setDbSetupError] = useState<'RLS_ERROR' | 'RELATION_MISSING' | null>(null);
+  const [copied, setCopied] = useState(false);
 
-  // Sample users data
-  const users: User[] = [
-    { id: '1', name: 'Admin Utama', username: 'admin', role: 'admin', pin: '1234' },
-    { id: '2', name: 'Siti Aminah', username: 'kasir', role: 'kasir', pin: '0000' }
-  ];
+  const handleCopySql = () => {
+    navigator.clipboard.writeText(SETUP_SQL);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleInitialSetup = async () => {
+    setLoading(true);
+    setStatus('Memulai inisialisasi...');
+    setDbSetupError(null);
+    try {
+      // Create admin
+      setStatus('Menyiapkan akun Administrator...');
+      try {
+        await firebaseService.createUser('admin', '123456', 'Administrator', 'admin');
+      } catch (e: any) {
+        if (e.code !== 'auth/email-already-in-use') throw e;
+        console.log("Admin account already exists in Auth.");
+      }
+      
+      // Create kasir
+      setStatus('Menyiapkan akun Kasir...');
+      try {
+        await firebaseService.createUser('kasir', '000000', 'Kasir Toko', 'kasir');
+      } catch (e: any) {
+        if (e.code !== 'auth/email-already-in-use') throw e;
+        console.log("Kasir account already exists in Auth.");
+      }
+      
+      // Seed products - Try to login as admin to perform other setup
+      setStatus('Menyiapkan data sistem...');
+      try {
+        // Try the default PIN first
+        try {
+          await firebaseService.login('admin', '123456');
+        } catch (loginErr: any) {
+          // If default fails, maybe it's the old 4-digit PIN?
+          if (loginErr.code === 'auth/invalid-credential' || loginErr.code === 'auth/wrong-password') {
+            console.log("PIN 123456 failed, trying legacy PIN 1234...");
+            await firebaseService.login('admin', '1234');
+          } else {
+            throw loginErr;
+          }
+        }
+        
+        setStatus('Mengisi katalog produk...');
+        for (const p of PRODUCTS) {
+          await firebaseService.saveProduct(p);
+        }
+        
+        setStatus('Menyiapkan kategori...');
+        const categoriesToSave = ['Semua', 'Bolen Pisang', 'Bolen Spesial', 'Roti & Snack', 'Paket Box', 'Minuman'];
+        for (const cat of categoriesToSave) {
+          await firebaseService.saveCategory(cat);
+        }
+        
+        setStatus('Menyiapkan konfigurasi...');
+        await firebaseService.saveConfig({
+          name: 'BroBread',
+          logo: 'B',
+          logoUrl: '',
+          address: 'Jl. Raya No. 123, Purwokerto',
+          phone: '0812-3456-7890',
+          primaryColor: '#C58F72'
+        });
+      } catch (loginErr: any) {
+        if (loginErr.code === 'auth/invalid-credential') {
+          throw new Error("Akun Admin sudah ada di Firebase Auth namun dengan PIN yang berbeda. Silakan hapus user di Firebase Console atau hubungi administrator.");
+        }
+        throw loginErr;
+      }
+
+      setStatus('Selesai...');
+      await firebaseService.logout();
+      
+      toast("Inisialisasi Berhasil! Silakan login menggunakan akun demo.", "success");
+      setStatus('');
+    } catch (err: any) {
+      console.error("Setup Error:", err);
+      const errMsg = (err.message || '').toLowerCase();
+      const errCode = err.code || '';
+      
+      if (errCode === '42501' || errMsg.includes('row-level security') || errMsg.includes('violates row-level security') || errMsg.includes('policy')) {
+        setDbSetupError('RLS_ERROR');
+      } else if (errCode === '42P01' || errCode === 'PGRST205' || errMsg.includes('relation') || errMsg.includes('does not exist')) {
+        setDbSetupError('RELATION_MISSING');
+      } else if (err.code === 'auth/operation-not-allowed') {
+        toast("Gagal: Metode Email/Password belum aktif di Firebase Console.", "error");
+      } else {
+        toast("Gagal inisialisasi: " + (err.message || "Terjadi kesalahan."), "error");
+      }
+      setStatus('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const user = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.pin === pin);
-    if (user) {
-      onLogin(user);
-    } else {
-      setError('Username atau PIN salah. Silakan coba lagi.');
+    setLoading(true);
+    setError('');
+    try {
+      const fbUser = await firebaseService.login(username, pin);
+      if (fbUser) {
+        const userDoc = await firebaseService.getUser(fbUser.uid);
+        if (userDoc) {
+          onLogin(userDoc);
+        } else {
+          const fallbackUser: User = {
+            id: fbUser.uid,
+            name: username,
+            username: username,
+            role: username.toLowerCase() === 'admin' ? 'admin' : 'kasir',
+            pin: ''
+          };
+          onLogin(fallbackUser);
+        }
+      }
+    } catch (err: any) {
+      console.error("Login catching error details:", err);
+      const errMsg = (err.message || '').toLowerCase();
+      const errCode = err.code || '';
+      
+      if (errCode === '42501' || errMsg.includes('security') || errMsg.includes('row-level security') || errMsg.includes('policy')) {
+        setDbSetupError('RLS_ERROR');
+      } else if (errCode === '42P01' || errCode === 'PGRST205' || errMsg.includes('relation') || errMsg.includes('does not exist')) {
+        setDbSetupError('RELATION_MISSING');
+      } else if (errCode === 'auth/invalid-credential') {
+        // Run a silent database presence/empty check because RLS might be returning 0 rows for SELECT without throwing
+        try {
+          const { data, error } = await supabase.from('users').select('id').limit(1);
+          if (error) {
+            const innerCode = error.code || '';
+            const innerMsg = (error.message || '').toLowerCase();
+            if (innerCode === '42501' || innerMsg.includes('security') || innerMsg.includes('row-level security') || innerMsg.includes('policy')) {
+              setDbSetupError('RLS_ERROR');
+            } else if (innerCode === '42P01' || innerCode === 'PGRST205' || innerMsg.includes('relation') || innerMsg.includes('does not exist')) {
+              setDbSetupError('RELATION_MISSING');
+            } else {
+              setError('Login Gagal. Pastikan Username & PIN benar.');
+            }
+          } else if (!data || data.length === 0) {
+            // No users exist at all - must be a fresh Supabase instance that needs seeding
+            setDbSetupError('RELATION_MISSING');
+          } else {
+            setError('Login Gagal. Pastikan Username & PIN benar.');
+          }
+        } catch (checkErr) {
+          setError('Login Gagal. Pastikan Username & PIN benar.');
+        }
+      } else {
+        setError('Terjadi kesalahan login. Jika ini database baru, pastikan tabel telah dibuat.');
+      }
       setPin('');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1185,50 +2054,140 @@ const LoginView = ({ onLogin, config }: { onLogin: (user: User) => void, config:
             </motion.p>
           )}
 
-          <button 
-            type="submit"
-            className="w-full py-5 rounded-2xl bg-bakery-terracotta text-white font-black text-sm uppercase tracking-widest shadow-xl shadow-bakery-terracotta/30 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3"
-          >
-            <Lock className="w-5 h-5" />
-            Masuk Sekarang
-          </button>
+            <button 
+              type="submit"
+              disabled={loading}
+              className="w-full py-5 rounded-2xl bg-bakery-terracotta text-white font-black text-sm uppercase tracking-widest shadow-xl shadow-bakery-terracotta/30 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-70"
+            >
+              <Lock className="w-5 h-5" />
+              {loading ? (status || 'Menghubungkan...') : 'Masuk Sekarang'}
+            </button>
+            
+            {status && (
+              <p className="text-[10px] text-bakery-terracotta font-black text-center animate-pulse uppercase tracking-widest mt-2">
+                {status}
+              </p>
+            )}
         </form>
 
         <div className="mt-10 flex flex-col items-center gap-4">
           <p className="text-[10px] text-bakery-muted font-bold uppercase tracking-widest">Akun Demo:</p>
           <div className="flex gap-4">
             <button 
-              onClick={() => { setUsername('admin'); setPin('1234'); }}
+              onClick={() => { setUsername('admin'); setPin('123456'); }}
               className="text-[9px] bg-bakery-cream border border-bakery-tan/20 px-3 py-1.5 rounded-full font-black text-bakery-muted hover:text-bakery-terracotta transition-colors"
             >
-              ADMIN (1234)
+              ADMIN (123456)
             </button>
             <button 
-              onClick={() => { setUsername('kasir'); setPin('0000'); }}
+              onClick={() => { setUsername('kasir'); setPin('000000'); }}
               className="text-[9px] bg-bakery-cream border border-bakery-tan/20 px-3 py-1.5 rounded-full font-black text-bakery-muted hover:text-bakery-terracotta transition-colors"
             >
-              KASIR (0000)
+              KASIR (000000)
             </button>
           </div>
         </div>
       </motion.div>
+
+      {/* DB Setup Error Modal */}
+      {dbSetupError && (
+        <div className="fixed inset-0 bg-bakery-bark/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white w-full max-w-2xl rounded-[32px] p-8 md:p-10 shadow-2xl border border-bakery-tan/20 max-h-[90vh] overflow-y-auto"
+          >
+            <div className="flex items-center gap-4 text-amber-600 mb-6 border-b border-bakery-tan/20 pb-4">
+              <AlertTriangle className="w-8 h-8 flex-shrink-0 animate-bounce" />
+              <div className="text-left">
+                <h2 className="text-xl font-serif font-black text-bakery-bark">
+                  {dbSetupError === 'RLS_ERROR' ? 'Supabase Row-Level Security (RLS) Aktif' : 'Tabel Database Belum Tersedia'}
+                </h2>
+                <p className="text-[10px] text-bakery-muted font-black uppercase tracking-widest mt-1">
+                  Penyebab: {dbSetupError === 'RLS_ERROR' ? 'Akses Tulis Tanpa Kunci Diblokir' : 'Relasi Database Belum Dibuat'}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-sm text-bakery-muted leading-relaxed mb-6 font-medium text-left">
+              {dbSetupError === 'RLS_ERROR' 
+                ? 'Sistem berhasil mendeteksi tabel Supabase Anda, namun data tidak bisa ditulis karena Row-Level Security (RLS) diaktifkan tanpa kebijakan (policy) publik. Untuk menyalakan sistem POS, silakan jalankan query SQL di bawah ini pada dashboard Supabase untuk menonaktifkan RLS:'
+                : 'Sistem mendeteksi bahwa tabel-tabel database yang diperlukan belum dibuat di database Supabase Anda. Silakan jalankan query SQL di bawah ini pada dashboard Supabase Anda untuk membuat relasi tabel dan menonaktifkan RLS:'}
+            </p>
+
+            <div className="space-y-4 mb-8">
+              <div className="flex items-center gap-3 bg-bakery-cream/50 border border-bakery-tan/20 p-4 rounded-2xl text-left">
+                <span className="w-6 h-6 rounded-full bg-bakery-terracotta text-white flex items-center justify-center font-black text-xs">1</span>
+                <p className="text-xs font-bold text-bakery-bark">Buka dashboard proyek Anda di <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" className="text-bakery-terracotta underline">Supabase Console</a>.</p>
+              </div>
+              <div className="flex items-center gap-3 bg-bakery-cream/50 border border-bakery-tan/20 p-4 rounded-2xl text-left">
+                <span className="w-6 h-6 rounded-full bg-bakery-terracotta text-white flex items-center justify-center font-black text-xs">2</span>
+                <p className="text-xs font-bold text-bakery-bark">Pilih menu <strong className="font-extrabold uppercase text-[10px] tracking-wider text-bakery-terracotta">SQL Editor</strong> di sidebar sebelah kiri.</p>
+              </div>
+              <div className="flex items-center gap-3 bg-bakery-cream/50 border border-bakery-tan/20 p-4 rounded-2xl text-left">
+                <span className="w-6 h-6 rounded-full bg-bakery-terracotta text-white flex items-center justify-center font-black text-xs">3</span>
+                <p className="text-xs font-bold text-bakery-bark">Klik <strong className="font-extrabold uppercase text-[10px] tracking-wider text-bakery-terracotta">+ New Query</strong>, tempelkan skrip SQL di bawah ini, lalu klik <strong className="font-extrabold uppercase text-[10px] tracking-wider text-bakery-terracotta">Run</strong>.</p>
+              </div>
+            </div>
+
+            <div className="relative rounded-2xl bg-slate-900 border border-slate-800 p-5 font-mono text-xs text-slate-300 max-h-60 overflow-y-auto mb-6 text-left">
+              <pre className="whitespace-pre-wrap">{SETUP_SQL}</pre>
+              <button
+                onClick={handleCopySql}
+                className="absolute top-3 right-3 bg-white/10 hover:bg-white/20 active:scale-95 text-white text-[10px] font-black uppercase tracking-wider py-2 px-3 rounded-xl transition-all flex items-center gap-2"
+              >
+                {copied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Disalin!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Salin SQL</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="flex gap-4 border-t border-bakery-tan/20 pt-6">
+              <button
+                onClick={() => setDbSetupError(null)}
+                className="flex-1 py-4 bg-bakery-bark text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-bakery-bark/90 transition-all active:scale-[0.98]"
+              >
+                Tutup Panduan
+              </button>
+              <button
+                onClick={() => {
+                  setDbSetupError(null);
+                  handleInitialSetup();
+                }}
+                className="flex-1 py-4 bg-bakery-terracotta text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg shadow-bakery-terracotta/30"
+              >
+                Coba Lagi
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };
 
 export default function App() {
-  const [categories, setCategories] = useState(CATEGORIES);
-  const [products, setProducts] = useState(PRODUCTS);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [categoryDetails, setCategoryDetails] = useState<Record<string, { description: string, image: string, color: string }>>({});
+  const [products, setProducts] = useState<Product[]>([]);
   const [activeCategory, setActiveCategory] = useState('Semua');
   const [searchQuery, setSearchQuery] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [view, setView] = useState<'menu' | 'history' | 'reports' | 'settings'>('menu');
+  const [view, setView] = useState<'menu' | 'history' | 'reports' | 'settings' | 'loading'>('loading');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const userRole = currentUser?.role || 'kasir';
-  const [adminSection, setAdminSection] = useState<'general' | 'reports' | 'history' | 'catalog'>('general');
+  const [adminSection, setAdminSection] = useState<'general' | 'reports' | 'history' | 'catalog' | 'kasir' | 'website'>('general');
   const [systemConfig, setSystemConfig] = useState({
     name: 'BroBread',
     logo: 'B',
@@ -1237,6 +2196,114 @@ export default function App() {
     phone: '0812-3456-7890',
     primaryColor: '#C58F72'
   });
+  const [quotaError, setQuotaError] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
+  const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(window.innerWidth >= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    (window as any).showToast = (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
+      setToast({ message: msg, type });
+    };
+    return () => {
+      delete (window as any).showToast;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  // Auth Listener
+  useEffect(() => {
+    const unsubscribe = firebaseService.onAuthStateChanged(async (fbUser) => {
+      if (fbUser) {
+        const userDoc = await firebaseService.getUser(fbUser.uid);
+        if (userDoc) {
+          setCurrentUser(userDoc);
+        } else {
+          // Placeholder user
+          const username = fbUser.email?.split('@')[0] || 'staff';
+          setCurrentUser({
+            id: fbUser.uid,
+            name: fbUser.displayName || 'Staff',
+            username: username,
+            role: (username.toLowerCase() === 'admin' || fbUser.displayName === 'Administrator') ? 'admin' : 'kasir',
+            pin: ''
+          });
+        }
+        setView('menu');
+      } else {
+        setCurrentUser(null);
+        setView('menu'); // View is 'menu' but not logged in will show login if needed
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Data Listeners
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const handleDbError = (err: any) => {
+      console.error("Firestore Listener Error captured: ", err);
+      if (err?.code === 'resource-exhausted' || err?.message?.includes('resource-exhausted') || err?.message?.includes('Quota exceeded')) {
+        setQuotaError(true);
+      }
+    };
+
+    const unsubProducts = firebaseService.onProductsChange(setProducts, handleDbError);
+    const unsubTransactions = firebaseService.onTransactionsChange(setTransactions, handleDbError);
+
+    // Initial Fetch for categories and config
+    firebaseService.getCategoriesWithDetails().then(catsWithDetails => {
+      setCategories(catsWithDetails.map(c => c.name));
+      const detailsMap: Record<string, { description: string, image: string, color: string }> = {};
+      catsWithDetails.forEach(c => {
+        detailsMap[c.name] = {
+          description: c.description,
+          image: c.image,
+          color: c.color
+        };
+      });
+      setCategoryDetails(detailsMap);
+    }).catch(handleDbError);
+    firebaseService.getConfig().then(cfg => {
+      if (cfg) setSystemConfig(cfg);
+    }).catch(handleDbError);
+
+    return () => {
+      unsubProducts();
+      unsubTransactions();
+    };
+  }, [currentUser]);
+
+  const refreshCategories = () => {
+    firebaseService.getCategoriesWithDetails().then(catsWithDetails => {
+      setCategories(catsWithDetails.map(c => c.name));
+      const detailsMap: Record<string, { description: string, image: string, color: string }> = {};
+      catsWithDetails.forEach(c => {
+        detailsMap[c.name] = {
+          description: c.description,
+          image: c.image,
+          color: c.color
+        };
+      });
+      setCategoryDetails(detailsMap);
+    }).catch(err => console.error("Error refreshing categories:", err));
+  };
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'e-wallet' | 'card'>('cash');
   const [isSuccess, setIsSuccess] = useState(false);
   const [cashReceived, setCashReceived] = useState<string>('');
@@ -1248,22 +2315,24 @@ export default function App() {
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
-  const handleSaveEdit = (updatedTx: Transaction, notes: string) => {
-    setTransactions(prev => prev.map(tx => {
-      if (tx.id === updatedTx.id) {
-        const editLog = {
-          timestamp: new Date(),
-          changedBy: currentUser?.name || 'Admin',
-          notes: notes
-        };
-        return {
-          ...updatedTx,
-          editLogs: [...(tx.editLogs || []), editLog]
-        };
-      }
-      return tx;
-    }));
-    setEditingTransaction(null);
+  const handleSaveEdit = async (updatedTx: Transaction, notes: string) => {
+    const editLog = {
+      timestamp: new Date(),
+      changedBy: currentUser?.name || 'Admin',
+      notes: notes
+    };
+    const txToSave = {
+      ...updatedTx,
+      editLogs: [...(updatedTx.editLogs || []), editLog]
+    };
+
+    try {
+      await firebaseService.saveTransaction(txToSave);
+      setEditingTransaction(null);
+      toast("Perubahan transaksi berhasil disimpan!", "success");
+    } catch (err) {
+      toast("Gagal menyimpan perubahan transaksi.", "error");
+    }
   };
 
   useEffect(() => {
@@ -1419,7 +2488,7 @@ export default function App() {
   };
 
   // Finalize Transaction
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     const newTransaction: Transaction = {
       id: `TX-${Date.now()}`,
       items: [...cart],
@@ -1427,14 +2496,19 @@ export default function App() {
       timestamp: new Date(),
       paymentMethod
     };
-    setTransactions(prev => [newTransaction, ...prev]);
-    setIsSuccess(true);
-    setTimeout(() => {
-      setIsSuccess(false);
-      setShowCheckout(false);
-      setCashReceived('');
-      clearCart();
-    }, 2000);
+
+    try {
+      await firebaseService.saveTransaction(newTransaction);
+      setIsSuccess(true);
+      setTimeout(() => {
+        setIsSuccess(false);
+        setShowCheckout(false);
+        setCashReceived('');
+        clearCart();
+      }, 2000);
+    } catch (err) {
+      toast("Gagal menyimpan transaksi. Periksa koneksi Anda.", "error");
+    }
   };
 
   if (!currentUser) {
@@ -1443,6 +2517,69 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-bakery-cream flex flex-col md:flex-row">
+      
+      {/* Quota Exceeded Modal */}
+      <AnimatePresence>
+        {quotaError && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-stone-900/80 backdrop-blur-md"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-white max-w-xl w-full rounded-[32px] p-8 md:p-10 shadow-2xl border border-red-100 flex flex-col items-center text-center relative overflow-hidden"
+            >
+              {/* Subtle decorative background glow */}
+              <div className="absolute -top-12 -left-12 w-32 h-32 bg-red-100/50 rounded-full blur-2xl" />
+              <div className="absolute -bottom-12 -right-12 w-32 h-32 bg-amber-100/50 rounded-full blur-2xl" />
+
+              <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-6 shadow-inner animate-pulse">
+                <AlertTriangle className="w-8 h-8" />
+              </div>
+
+              <h3 className="text-xl md:text-2xl font-serif font-black text-stone-900 mb-3 leading-tight">
+                Kuota Harian Firestore Habis
+              </h3>
+
+              <p className="text-sm text-stone-600 mb-6 leading-relaxed">
+                Aplikasi <strong>{systemConfig.name}</strong> saat ini mendeteksi bahwa kuota tulis/baca harian gratis (Spark Plan) untuk database Anda telah habis (<em>Quota exceeded</em>). 
+              </p>
+
+              <div className="bg-amber-50/70 border border-amber-200/50 rounded-2xl p-4 mb-6 text-left w-full space-y-2">
+                <p className="text-xs font-bold text-amber-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" /> Info Quota & Solusi:
+                </p>
+                <ul className="list-disc pl-4 text-xs text-amber-900 leading-relaxed font-semibold space-y-1">
+                  <li>Google mengatur ulang (reset) kuota gratis setiap hari pada pukul 14:00 WIB (00:00 PST).</li>
+                  <li>Anda dapat memantau penggunaan unit database Firestore, atau meningkatkan ke paket berbayar di Firebase Console.</li>
+                </ul>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 w-full animate-fade-in">
+                <a
+                  href="https://console.firebase.google.com/project/brocodeid-project/firestore/databases/ai-studio-0897d681-c86c-4e15-8984-47b8f0b605de/data?openUpgradeDialog=true"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 py-4 bg-bakery-terracotta text-white rounded-2xl font-bold text-sm tracking-wide shadow-lg shadow-bakery-terracotta/20 hover:scale-[1.02] active:scale-[0.98] transition-all text-center"
+                >
+                  Buka Firebase Console
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setQuotaError(false)}
+                  className="py-4 px-6 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-2xl font-bold text-sm tracking-wide transition-all"
+                >
+                  Tutup Sementara
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       {/* Sidebar for History / Dashboard (Desktop) */}
       <aside className="hidden md:flex w-24 flex-col bg-bakery-tan text-bakery-bark py-8 gap-8 items-center border-r border-bakery-tan/50 sticky top-0 h-screen">
@@ -1462,24 +2599,21 @@ export default function App() {
             <ShoppingBag className="w-6 h-6" />
           </button>
           
-          {userRole === 'kasir' && (
-            <>
-              <button 
-                onClick={() => setView('history')}
-                className={`p-3 rounded-2xl transition-all ${view === 'history' ? 'bg-white shadow-sm text-bakery-terracotta' : 'text-bakery-muted hover:text-bakery-terracotta'}`}
-                title="Riwayat Transaksi"
-              >
-                <History className="w-6 h-6" />
-              </button>
-              <button 
-                onClick={() => setView('reports')}
-                className={`p-3 rounded-2xl transition-all ${view === 'reports' ? 'bg-white shadow-sm text-bakery-terracotta' : 'text-bakery-muted hover:text-bakery-terracotta'}`}
-                title="Laporan Penjualan"
-              >
-                <BarChart3 className="w-6 h-6" />
-              </button>
-            </>
-          )}
+          <button 
+            onClick={() => setView('history')}
+            className={`p-3 rounded-2xl transition-all ${view === 'history' ? 'bg-white shadow-sm text-bakery-terracotta' : 'text-bakery-muted hover:text-bakery-terracotta'}`}
+            title="Riwayat Transaksi"
+          >
+            <History className="w-6 h-6" />
+          </button>
+
+          <button 
+            onClick={() => setView('reports')}
+            className={`p-3 rounded-2xl transition-all ${view === 'reports' ? 'bg-white shadow-sm text-bakery-terracotta' : 'text-bakery-muted hover:text-bakery-terracotta'}`}
+            title="Laporan Penjualan"
+          >
+            <BarChart3 className="w-6 h-6" />
+          </button>
 
           {userRole === 'admin' && (
             <button 
@@ -1493,7 +2627,7 @@ export default function App() {
         </div>
         <div className="flex flex-col gap-3 items-center">
           <button 
-            onClick={() => setCurrentUser(null)}
+            onClick={() => firebaseService.logout()}
             className="p-3 rounded-2xl text-red-400 hover:text-red-600 transition-colors"
             title="Keluar"
           >
@@ -1625,7 +2759,10 @@ export default function App() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pb-32">
                 <SettingsView 
                   config={systemConfig} 
-                  setConfig={setSystemConfig} 
+                  setConfig={(newConfig) => {
+                    setSystemConfig(newConfig);
+                    firebaseService.saveConfig(newConfig);
+                  }} 
                   userRole={userRole} 
                   setView={setView}
                   activeSection={adminSection}
@@ -1636,6 +2773,9 @@ export default function App() {
                   setProducts={setProducts}
                   categories={categories}
                   setCategories={setCategories}
+                  categoryDetails={categoryDetails}
+                  setCategoryDetails={setCategoryDetails}
+                  refreshCategories={refreshCategories}
                 />
             </motion.div>
           ) : (
@@ -1751,46 +2891,51 @@ export default function App() {
 
               {/* Category Detail Header */}
               <AnimatePresence mode="wait">
-                {activeCategory !== 'Semua' && CATEGORY_DETAILS[activeCategory] && (
-                  <motion.div 
-                    key={activeCategory}
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 10 }}
-                    className="mb-10 relative overflow-hidden rounded-[32px] border border-bakery-tan/30 group"
-                  >
-                    <div className="absolute inset-0 z-0">
-                      <img 
-                        src={CATEGORY_DETAILS[activeCategory].image} 
-                        alt="" 
-                        className="w-full h-full object-cover opacity-20 transition-transform duration-[2s] group-hover:scale-110"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className={`absolute inset-0 bg-gradient-to-br ${CATEGORY_DETAILS[activeCategory].color} backdrop-blur-[2px]`} />
-                    </div>
-                    <div className="relative z-10 p-8 md:p-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-                      <div className="max-w-xl">
-                        <div className="flex items-center gap-3 mb-4">
-                          <div className="bg-bakery-terracotta text-white p-2 rounded-xl shadow-lg shadow-bakery-terracotta/20">
-                            {getCategoryIcon(activeCategory)}
+                {activeCategory !== 'Semua' && (categoryDetails[activeCategory] || CATEGORY_DETAILS[activeCategory]) && (() => {
+                  const activeCatDetails = categoryDetails[activeCategory] || CATEGORY_DETAILS[activeCategory];
+                  return (
+                    <motion.div 
+                      key={activeCategory}
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      className="mb-10 relative overflow-hidden rounded-[32px] border border-bakery-tan/30 group"
+                    >
+                      <div className="absolute inset-0 z-0">
+                        {activeCatDetails.image && (
+                          <img 
+                            src={activeCatDetails.image} 
+                            alt="" 
+                            className="w-full h-full object-cover opacity-20 transition-transform duration-[2s] group-hover:scale-110"
+                            referrerPolicy="no-referrer"
+                          />
+                        )}
+                        <div className={`absolute inset-0 bg-gradient-to-br ${activeCatDetails.color || 'from-yellow-400/10 to-orange-500/10'} backdrop-blur-[2px]`} />
+                      </div>
+                      <div className="relative z-10 p-8 md:p-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                        <div className="max-w-xl">
+                          <div className="flex items-center gap-3 mb-4">
+                            <div className="bg-bakery-terracotta text-white p-2 rounded-xl shadow-lg shadow-bakery-terracotta/20">
+                              {getCategoryIcon(activeCategory)}
+                            </div>
+                            <h2 className="text-3xl md:text-4xl font-serif font-black text-bakery-bark">
+                               {activeCategory}
+                            </h2>
                           </div>
-                          <h2 className="text-3xl md:text-4xl font-serif font-black text-bakery-bark lowercase">
-                             {activeCategory}
-                          </h2>
+                          <p className="text-bakery-bark/70 text-sm md:text-base leading-relaxed font-semibold">
+                            {activeCatDetails.description}
+                          </p>
                         </div>
-                        <p className="text-bakery-bark/70 text-sm md:text-base leading-relaxed font-semibold">
-                          {CATEGORY_DETAILS[activeCategory].description}
-                        </p>
-                      </div>
-                      <div className="shrink-0 space-y-2 text-right">
-                        <div className="text-[10px] font-black uppercase tracking-[0.2em] text-bakery-muted/60">Tersedia</div>
-                        <div className="text-2xl font-serif font-bold text-bakery-bark">
-                          {getCategoryCount(activeCategory)} Menu pilihan
+                        <div className="shrink-0 space-y-2 text-right">
+                          <div className="text-[10px] font-black uppercase tracking-[0.2em] text-bakery-muted/60">Tersedia</div>
+                          <div className="text-2xl font-serif font-bold text-bakery-bark">
+                            {getCategoryCount(activeCategory)} Menu pilihan
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </motion.div>
-                )}
+                    </motion.div>
+                  );
+                })()}
               </AnimatePresence>
 
               {/* Product Grid - Visual Focus */}
@@ -1838,46 +2983,60 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          <nav className="bg-white/95 backdrop-blur-xl rounded-[32px] p-2 border border-bakery-tan shadow-[0_20px_50px_rgba(74,55,40,0.15)] flex gap-2 w-full">
+          <nav className="bg-white/95 backdrop-blur-xl rounded-[32px] p-2 border border-bakery-tan shadow-[0_20px_50px_rgba(74,55,40,0.15)] flex gap-1.5 items-center w-full">
             <button 
               onClick={() => setView('menu')}
-              className={`flex-1 py-4 rounded-[26px] flex items-center justify-center gap-3 transition-all ${view === 'menu' ? 'bg-bakery-terracotta text-white shadow-xl shadow-bakery-terracotta/20 scale-[1.02]' : 'text-bakery-muted font-bold'}`}
+              className={`flex-1 py-1.5 sm:py-3.5 px-0.5 rounded-2xl flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2.5 transition-all ${
+                view === 'menu' 
+                  ? 'bg-bakery-terracotta text-white shadow-xl shadow-bakery-terracotta/20 scale-[1.02]' 
+                  : 'text-bakery-muted font-bold'
+              }`}
             >
-              <Store className="w-5 h-5" />
-              <span className="text-xs font-black uppercase tracking-widest">Menu</span>
+              <Store className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider">Menu</span>
             </button>
             
-            {userRole === 'kasir' ? (
-              <>
-                <button 
-                  onClick={() => setView('history')}
-                  className={`flex-1 py-4 rounded-[26px] flex items-center justify-center gap-3 transition-all ${view === 'history' ? 'bg-bakery-terracotta text-white shadow-xl shadow-bakery-terracotta/20 scale-[1.02]' : 'text-bakery-muted font-bold'}`}
-                >
-                  <History className="w-5 h-5" />
-                  <span className="text-xs font-black uppercase tracking-widest">Riwayat</span>
-                </button>
-                <button 
-                  onClick={() => setView('reports')}
-                  className={`flex-1 py-4 rounded-[26px] flex items-center justify-center gap-3 transition-all ${view === 'reports' ? 'bg-bakery-terracotta text-white shadow-xl shadow-bakery-terracotta/20 scale-[1.02]' : 'text-bakery-muted font-bold'}`}
-                >
-                  <BarChart3 className="w-5 h-5" />
-                  <span className="text-xs font-black uppercase tracking-widest">Laporan</span>
-                </button>
-              </>
-            ) : (
+            <button 
+              onClick={() => setView('history')}
+              className={`flex-1 py-1.5 sm:py-3.5 px-0.5 rounded-2xl flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2.5 transition-all ${
+                view === 'history' 
+                  ? 'bg-bakery-terracotta text-white shadow-xl shadow-bakery-terracotta/20 scale-[1.02]' 
+                  : 'text-bakery-muted font-bold'
+              }`}
+            >
+              <History className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider">Riwayat</span>
+            </button>
+            <button 
+              onClick={() => setView('reports')}
+              className={`flex-1 py-1.5 sm:py-3.5 px-0.5 rounded-2xl flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2.5 transition-all ${
+                view === 'reports' 
+                  ? 'bg-bakery-terracotta text-white shadow-xl shadow-bakery-terracotta/20 scale-[1.02]' 
+                  : 'text-bakery-muted font-bold'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider">Laporan</span>
+            </button>
+            {userRole === 'admin' && (
               <button 
                 onClick={() => { setView('settings'); setAdminSection('general'); }}
-                className={`flex-1 py-4 rounded-[26px] flex items-center justify-center gap-3 transition-all ${view === 'settings' ? 'bg-bakery-terracotta text-white shadow-xl shadow-bakery-terracotta/20 scale-[1.02]' : 'text-bakery-muted font-bold'}`}
+                className={`flex-1 py-1.5 sm:py-3.5 px-0.5 rounded-2xl flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2.5 transition-all ${
+                  view === 'settings' 
+                    ? 'bg-bakery-terracotta text-white shadow-xl shadow-bakery-terracotta/20 scale-[1.02]' 
+                    : 'text-bakery-muted font-bold'
+                }`}
               >
-                <Settings className="w-5 h-5" />
-                <span className="text-xs font-black uppercase tracking-widest">Admin</span>
+                <Settings className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+                <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider">Admin</span>
               </button>
             )}
             <button 
-              onClick={() => setCurrentUser(null)}
-              className="w-12 h-14 rounded-[22px] flex items-center justify-center text-red-500 bg-red-50 active:bg-red-100 transition-all border border-red-100/50"
+              onClick={() => firebaseService.logout()}
+              className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl flex-shrink-0 flex items-center justify-center text-red-500 bg-red-50 active:bg-red-100 transition-all border border-red-100/50"
+              title="Keluar"
             >
-              <LogOut className="w-5 h-5" />
+              <LogOut className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
             </button>
           </nav>
         </div>
@@ -1885,7 +3044,7 @@ export default function App() {
 
       {/* Cart Panel (Desktop Sidebar / Mobile Drawer) */}
       <AnimatePresence>
-        {(isCartOpen || window.innerWidth >= 768) && (
+        {(isCartOpen || isDesktop) && (
           <>
             {/* Backdrop for Mobile */}
             {isCartOpen && (
@@ -1914,7 +3073,7 @@ export default function App() {
                   <button onClick={clearCart} className="p-2 text-bakery-muted hover:text-red-500 transition-colors bg-bakery-cream rounded-xl">
                     <Trash2 className="w-5 h-5" />
                   </button>
-                  <button onClick={() => setIsCartOpen(false)} className="p-2 text-stone-400 bg-bakery-cream rounded-xl">
+                  <button onClick={() => setIsCartOpen(false)} className="p-2 text-stone-400 bg-bakery-cream rounded-xl md:hidden">
                     <X className="w-6 h-6" />
                   </button>
                 </div>
@@ -2384,6 +3543,39 @@ export default function App() {
                 </motion.div>
               </AnimatePresence>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+ 
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="fixed bottom-6 right-6 z-[999] flex items-center gap-3 bg-white px-5 py-4 rounded-2xl shadow-xl border border-bakery-tan/20 max-w-sm"
+          >
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+              toast.type === 'success' ? 'bg-green-50 text-green-600' :
+              toast.type === 'error' ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-blue-500'
+            }`}>
+              {toast.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : 
+               toast.type === 'error' ? <AlertTriangle className="w-5 h-5" /> : <Package className="w-5 h-5" />}
+            </div>
+            <div className="flex-1 min-w-0 pr-1">
+              <p className="text-xs font-bold uppercase tracking-wider text-bakery-muted">
+                {toast.type === 'success' ? 'Sukses' :
+                 toast.type === 'error' ? 'Peringatan' : 'Informasi'}
+              </p>
+              <p className="text-xs font-black text-bakery-bark leading-snug mt-0.5">{toast.message}</p>
+            </div>
+            <button 
+              onClick={() => setToast(null)}
+              className="p-1 rounded-lg text-bakery-muted hover:text-bakery-bark transition-colors hover:bg-bakery-cream"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </motion.div>
         )}
       </AnimatePresence>

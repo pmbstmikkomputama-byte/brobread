@@ -2,5 +2,7 @@
   "name": "BroBread",
   "description": "Sistem kasir mobile-first untuk toko kue BroBread, dengan antarmuka yang bersih, manajemen pesanan, dan rekap transaksi.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

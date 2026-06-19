@@ -59,7 +59,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
-const DOMAIN = '@brobread.internal';
+const DOMAIN = '@fattinabolen.internal';
 
 export const firebaseService = {
   // --- Auth ---

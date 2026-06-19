@@ -1,11 +1,11 @@
 import { supabase } from '../lib/supabase';
 import { Product, Transaction, User } from '../types';
 
-async function ensureBucketExists(bucketName: string = 'brobread-media') {
+async function ensureBucketExists(bucketName: string = 'fattina-bolen-media') {
   try {
     const { data: buckets, error: listError } = await supabase.storage.listBuckets();
     if (listError) {
-      console.error("Error listing buckets:", listError);
+      console.warn("Error listing buckets (using fallback):", listError.message);
       return;
     }
     const exists = buckets?.some(b => b.id === bucketName);
@@ -16,7 +16,7 @@ async function ensureBucketExists(bucketName: string = 'brobread-media') {
         fileSizeLimit: 5242880 // 5MB
       });
       if (createError) {
-        console.warn("Failed to create bucket dynamically:", createError);
+        console.warn("Failed to create bucket dynamically:", createError.message);
       } else {
         console.log(`Bucket "${bucketName}" created successfully!`);
       }
@@ -39,19 +39,38 @@ function getExtensionFromMime(mime: string): string {
 }
 
 async function uploadImage(base64OrFile: string | File, folder: string, filename?: string): Promise<string> {
-  const bucketName = 'brobread-media';
+  // If it's already a regular URL, just return it
+  if (typeof base64OrFile === 'string' && !base64OrFile.startsWith('data:image/')) {
+    return base64OrFile;
+  }
+
+  // Define a helper to convert File/Blob to Base64/local URL as a robust local fallback
+  const getLocalFallback = async (): Promise<string> => {
+    if (typeof base64OrFile === 'string') {
+      return base64OrFile;
+    }
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string || '');
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(base64OrFile);
+    });
+  };
+
+  const bucketName = 'fattina-bolen-media';
   
-  await ensureBucketExists(bucketName);
+  try {
+    await ensureBucketExists(bucketName);
+  } catch (e) {
+    console.warn("Storage check failed, using local fallback", e);
+    return getLocalFallback();
+  }
 
   let fileBody: Blob | File;
   let fileExt = 'png';
   let mimeType = 'image/png';
 
   if (typeof base64OrFile === 'string') {
-    if (!base64OrFile.startsWith('data:image/')) {
-      return base64OrFile;
-    }
-    
     try {
       const parts = base64OrFile.split(',');
       const mimeMatch = parts[0].match(/:(.*?);/);
@@ -82,24 +101,29 @@ async function uploadImage(base64OrFile: string | File, folder: string, filename
   
   const filePath = `${folder}/${cleanFilename}`;
 
-  const { error } = await supabase.storage
-    .from(bucketName)
-    .upload(filePath, fileBody, {
-      contentType: mimeType,
-      cacheControl: '3600',
-      upsert: true
-    });
+  try {
+    const { error } = await supabase.storage
+      .from(bucketName)
+      .upload(filePath, fileBody, {
+        contentType: mimeType,
+        cacheControl: '3600',
+        upsert: true
+      });
 
-  if (error) {
-    console.error("Supabase storage upload error:", error);
-    throw new Error(`Gagal mengunggah gambar ke Supabase Storage: ${error.message}`);
+    if (error) {
+      console.warn("Supabase storage upload error, returning local fallback:", error.message);
+      return getLocalFallback();
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from(bucketName)
+      .getPublicUrl(filePath);
+
+    return publicUrl || await getLocalFallback();
+  } catch (err: any) {
+    console.warn("Supabase storage fetch/network error, returning local fallback:", err?.message || err);
+    return getLocalFallback();
   }
-
-  const { data: { publicUrl } } = supabase.storage
-    .from(bucketName)
-    .getPublicUrl(filePath);
-
-  return publicUrl;
 }
 
 let currentLoggedUser: any = null;
@@ -107,7 +131,7 @@ const authListeners: ((user: any) => void)[] = [];
 
 // Try to retrieve user from localStorage on startup
 try {
-  const saved = localStorage.getItem('brobread_user');
+  const saved = localStorage.getItem('fattinabolen_user');
   if (saved) {
     currentLoggedUser = JSON.parse(saved);
   }
@@ -119,14 +143,14 @@ function notifyAuthListeners() {
   authListeners.forEach(cb => cb(currentLoggedUser ? {
     uid: currentLoggedUser.id,
     displayName: currentLoggedUser.name,
-    email: `${currentLoggedUser.username}@brobread.internal`
+    email: `${currentLoggedUser.username}@fattinabolen.internal`
   } : null));
 }
 
 // LocalStorage fallback cache helpers to gracefully bypass Supabase RLS policies (Errors 42501)
 function getLocalUsers(): User[] {
   try {
-    const saved = localStorage.getItem('brobread_users_cache');
+    const saved = localStorage.getItem('fattinabolen_users_cache');
     return saved ? JSON.parse(saved) : [];
   } catch {
     return [];
@@ -138,19 +162,19 @@ function saveLocalUser(user: User) {
     const idx = users.findIndex(u => u.id === user.id);
     if (idx !== -1) users[idx] = user;
     else users.push(user);
-    localStorage.setItem('brobread_users_cache', JSON.stringify(users));
+    localStorage.setItem('fattinabolen_users_cache', JSON.stringify(users));
   } catch(e) {}
 }
 function deleteLocalUser(id: string) {
   try {
     const users = getLocalUsers().filter(u => u.id !== id);
-    localStorage.setItem('brobread_users_cache', JSON.stringify(users));
+    localStorage.setItem('fattinabolen_users_cache', JSON.stringify(users));
   } catch(e) {}
 }
 
 function getLocalProducts(): Product[] {
   try {
-    const saved = localStorage.getItem('brobread_products_cache');
+    const saved = localStorage.getItem('fattinabolen_products_cache');
     return saved ? JSON.parse(saved) : [];
   } catch {
     return [];
@@ -162,19 +186,19 @@ function saveLocalProduct(product: Product) {
     const idx = products.findIndex(p => p.id === product.id);
     if (idx !== -1) products[idx] = product;
     else products.push(product);
-    localStorage.setItem('brobread_products_cache', JSON.stringify(products));
+    localStorage.setItem('fattinabolen_products_cache', JSON.stringify(products));
   } catch(e) {}
 }
 function deleteLocalProduct(id: string) {
   try {
     const products = getLocalProducts().filter(p => p.id !== id);
-    localStorage.setItem('brobread_products_cache', JSON.stringify(products));
+    localStorage.setItem('fattinabolen_products_cache', JSON.stringify(products));
   } catch(e) {}
 }
 
 function getLocalTransactions(): Transaction[] {
   try {
-    const saved = localStorage.getItem('brobread_transactions_cache');
+    const saved = localStorage.getItem('fattinabolen_transactions_cache');
     return saved ? JSON.parse(saved).map((tx: any) => ({ ...tx, timestamp: new Date(tx.timestamp) })) : [];
   } catch {
     return [];
@@ -186,13 +210,13 @@ function saveLocalTransaction(tx: Transaction) {
     const idx = txs.findIndex(t => t.id === tx.id);
     if (idx !== -1) txs[idx] = tx;
     else txs.push(tx);
-    localStorage.setItem('brobread_transactions_cache', JSON.stringify(txs));
+    localStorage.setItem('fattinabolen_transactions_cache', JSON.stringify(txs));
   } catch(e) {}
 }
 
 function getLocalConfig(): any {
   try {
-    const saved = localStorage.getItem('brobread_config_cache');
+    const saved = localStorage.getItem('fattinabolen_config_cache');
     return saved ? JSON.parse(saved) : null;
   } catch {
     return null;
@@ -200,13 +224,13 @@ function getLocalConfig(): any {
 }
 function saveLocalConfig(config: any) {
   try {
-    localStorage.setItem('brobread_config_cache', JSON.stringify(config));
+    localStorage.setItem('fattinabolen_config_cache', JSON.stringify(config));
   } catch(e) {}
 }
 
 function getLocalCategories(): string[] {
   try {
-    const saved = localStorage.getItem('brobread_categories_cache');
+    const saved = localStorage.getItem('fattinabolen_categories_cache');
     return saved ? JSON.parse(saved) : ['Semua', 'Bolen Pisang', 'Bolen Spesial', 'Roti & Snack', 'Paket Box', 'Minuman'];
   } catch {
     return ['Semua', 'Bolen Pisang', 'Bolen Spesial', 'Roti & Snack', 'Paket Box', 'Minuman'];
@@ -217,14 +241,14 @@ function saveLocalCategory(name: string) {
     const cats = getLocalCategories();
     if (!cats.includes(name)) {
       cats.push(name);
-      localStorage.setItem('brobread_categories_cache', JSON.stringify(cats));
+      localStorage.setItem('fattinabolen_categories_cache', JSON.stringify(cats));
     }
   } catch(e) {}
 }
 function deleteLocalCategory(name: string) {
   try {
     const cats = getLocalCategories().filter(c => c !== name);
-    localStorage.setItem('brobread_categories_cache', JSON.stringify(cats));
+    localStorage.setItem('fattinabolen_categories_cache', JSON.stringify(cats));
   } catch(e) {}
 }
 
@@ -368,18 +392,18 @@ export const supabaseService = {
     }
 
     currentLoggedUser = user;
-    localStorage.setItem('brobread_user', JSON.stringify(user));
+    localStorage.setItem('fattinabolen_user', JSON.stringify(user));
     notifyAuthListeners();
     return {
       uid: user.id,
       displayName: user.name,
-      email: `${user.username}@brobread.internal`
+      email: `${user.username}@fattinabolen.internal`
     };
   },
 
   async logout() {
     currentLoggedUser = null;
-    localStorage.removeItem('brobread_user');
+    localStorage.removeItem('fattinabolen_user');
     notifyAuthListeners();
   },
 
@@ -432,14 +456,14 @@ export const supabaseService = {
 
     if (!currentLoggedUser) {
       currentLoggedUser = newUser;
-      localStorage.setItem('brobread_user', JSON.stringify(newUser));
+      localStorage.setItem('fattinabolen_user', JSON.stringify(newUser));
       notifyAuthListeners();
     }
 
     return {
       uid: id,
       displayName: name,
-      email: `${username.toLowerCase()}@brobread.internal`
+      email: `${username.toLowerCase()}@fattinabolen.internal`
     };
   },
 
@@ -537,7 +561,7 @@ export const supabaseService = {
     callback(currentLoggedUser ? {
       uid: currentLoggedUser.id,
       displayName: currentLoggedUser.name,
-      email: `${currentLoggedUser.username}@brobread.internal`
+      email: `${currentLoggedUser.username}@fattinabolen.internal`
     } : null);
 
     return () => {
@@ -761,7 +785,7 @@ export const supabaseService = {
     const localCfg = getLocalConfig();
     return localCfg || {
       id: 'default',
-      name: 'BroBread',
+      name: 'Fattina Bolen',
       logo: '🍞',
       logoUrl: '',
       address: 'Jl. Raya No. 123, Cilacap',
@@ -854,7 +878,7 @@ export const supabaseService = {
     // Convert local cached details
     let localDetails: Record<string, { description: string, image: string, color: string }> = defaultDetails;
     try {
-      const localDetailsSaved = localStorage.getItem('brobread_categories_details_cache');
+      const localDetailsSaved = localStorage.getItem('fattinabolen_categories_details_cache');
       if (localDetailsSaved) {
         localDetails = { ...defaultDetails, ...JSON.parse(localDetailsSaved) };
       }
@@ -890,16 +914,6 @@ export const supabaseService = {
 
   async saveCategoryWithDetails(cat: { name: string; description: string; image: string; color: string; }) {
     saveLocalCategory(cat.name);
-    try {
-      const saved = localStorage.getItem('brobread_categories_details_cache');
-      const localDetails = saved ? JSON.parse(saved) : {};
-      localDetails[cat.name] = {
-        description: cat.description,
-        image: cat.image,
-        color: cat.color
-      };
-      localStorage.setItem('brobread_categories_details_cache', JSON.stringify(localDetails));
-    } catch(e) {}
 
     if (cat.image && cat.image.startsWith('data:image/')) {
       try {
@@ -909,6 +923,17 @@ export const supabaseService = {
         console.error("Failed to upload category image to storage:", err);
       }
     }
+
+    try {
+      const saved = localStorage.getItem('fattinabolen_categories_details_cache');
+      const localDetails = saved ? JSON.parse(saved) : {};
+      localDetails[cat.name] = {
+        description: cat.description,
+        image: cat.image,
+        color: cat.color
+      };
+      localStorage.setItem('fattinabolen_categories_details_cache', JSON.stringify(localDetails));
+    } catch(e) {}
 
     try {
       const { error } = await supabase
@@ -938,11 +963,11 @@ export const supabaseService = {
   async deleteCategory(name: string) {
     deleteLocalCategory(name);
     try {
-      const saved = localStorage.getItem('brobread_categories_details_cache');
+      const saved = localStorage.getItem('fattinabolen_categories_details_cache');
       if (saved) {
         const localDetails = JSON.parse(saved);
         delete localDetails[name];
-        localStorage.setItem('brobread_categories_details_cache', JSON.stringify(localDetails));
+        localStorage.setItem('fattinabolen_categories_details_cache', JSON.stringify(localDetails));
       }
     } catch (e) {}
 

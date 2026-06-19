@@ -38,10 +38,10 @@ service cloud.firestore {
       allow get: if isSignedIn() && isValidId(userId);
       allow list: if isSignedIn();
       
-      // Bootstrap Rule: Allow user to create their own record if they are 'admin@brobread.internal'
+      // Bootstrap Rule: Allow user to create their own record if they are 'admin@fattinabolen.internal'
       // or if they are being created by an existing admin.
       allow create: if isSignedIn() && request.auth.uid == userId && (
-        (request.auth.token.email == "admin@brobread.internal") || 
+        (request.auth.token.email == "admin@fattinabolen.internal") || 
         (incoming().role == "kasir") ||
         (isAdmin())
       );

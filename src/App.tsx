@@ -106,7 +106,7 @@ const CATEGORY_DETAILS: Record<string, { description: string, image: string, col
     color: 'from-red-400/10 to-rose-500/10'
   },
   'Minuman': {
-    description: 'Segarkan hari Anda dengan aneka minuman pilihan yang pas bersanding dengan produk BroBread.',
+    description: 'Segarkan hari Anda dengan aneka minuman pilihan yang pas bersanding dengan produk Fattina Bolen.',
     image: 'https://images.unsplash.com/photo-1541167760496-162955ed8a9f?q=80&w=800&auto=format&fit=crop',
     color: 'from-blue-400/10 to-cyan-500/10'
   }
@@ -282,7 +282,7 @@ const ReportsDashboard = ({ transactions }: { transactions: Transaction[] }) => 
       <div className="flex flex-col md:flex-row justify-between md:items-end gap-4">
         <div>
           <h2 className="text-3xl font-serif font-black text-bakery-bark">Analisis Penjualan</h2>
-          <p className="text-bakery-muted text-xs font-bold uppercase tracking-widest mt-1">Metrik performa BroBread hari ini</p>
+          <p className="text-bakery-muted text-xs font-bold uppercase tracking-widest mt-1">Metrik performa Fattina Bolen hari ini</p>
         </div>
         <div className="flex gap-2">
            <button 
@@ -1787,6 +1787,23 @@ ALTER TABLE IF EXISTS public.transactions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public."systemConfigs" DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.categories DISABLE ROW LEVEL SECURITY;
 
+-- 2b. Aktifkan & Izinkan Unggah Foto Secara Publik di Storage Buckets
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('fattina-bolen-media', 'fattina-bolen-media', true, 5242880, ARRAY['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml'])
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+DROP POLICY IF EXISTS "Public Access" ON storage.objects;
+CREATE POLICY "Public Access" ON storage.objects FOR SELECT TO anon, authenticated USING (bucket_id = 'fattina-bolen-media');
+
+DROP POLICY IF EXISTS "Public Insert" ON storage.objects;
+CREATE POLICY "Public Insert" ON storage.objects FOR INSERT TO anon, authenticated WITH CHECK (bucket_id = 'fattina-bolen-media');
+
+DROP POLICY IF EXISTS "Public Update" ON storage.objects;
+CREATE POLICY "Public Update" ON storage.objects FOR UPDATE TO anon, authenticated USING (bucket_id = 'fattina-bolen-media') WITH CHECK (bucket_id = 'fattina-bolen-media');
+
+DROP POLICY IF EXISTS "Public Delete" ON storage.objects;
+CREATE POLICY "Public Delete" ON storage.objects FOR DELETE TO anon, authenticated USING (bucket_id = 'fattina-bolen-media');
+
 -- 3. Masukkan Data Bawaan Awal (Default Seeds)
 INSERT INTO public.users (id, username, pin, name, role) VALUES
 ('b8764b8e-324c-473d-8ab1-24fbce828a25', 'admin', '123456', 'Administrator', 'admin'),
@@ -1803,7 +1820,7 @@ INSERT INTO public.categories (name, description, image, color) VALUES
 ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description, image = EXCLUDED.image, color = EXCLUDED.color;
 
 INSERT INTO public."systemConfigs" (id, name, logo, "logoUrl", address, phone, "primaryColor") VALUES
-('default', 'BroBread', 'B', '', 'Jl. Raya No. 123, Purwokerto', '0812-3456-7890', '#C58F72')
+('default', 'Fattina Bolen', 'F', '', 'Jl. Raya No. 123, Purwokerto', '0812-3456-7890', '#C58F72')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.products (id, name, price, category, description, image) VALUES
@@ -1889,8 +1906,8 @@ const LoginView = ({ onLogin, config }: { onLogin: (user: User) => void, config:
         
         setStatus('Menyiapkan konfigurasi...');
         await firebaseService.saveConfig({
-          name: 'BroBread',
-          logo: 'B',
+          name: 'Fattina Bolen',
+          logo: 'F',
           logoUrl: '',
           address: 'Jl. Raya No. 123, Purwokerto',
           phone: '0812-3456-7890',
@@ -2189,8 +2206,8 @@ export default function App() {
   const userRole = currentUser?.role || 'kasir';
   const [adminSection, setAdminSection] = useState<'general' | 'reports' | 'history' | 'catalog' | 'kasir' | 'website'>('general');
   const [systemConfig, setSystemConfig] = useState({
-    name: 'BroBread',
-    logo: 'B',
+    name: 'Fattina Bolen',
+    logo: 'F',
     logoUrl: '',
     address: 'Jl. Raya No. 123, Purwokerto',
     phone: '0812-3456-7890',
@@ -3334,7 +3351,7 @@ export default function App() {
                       >
                         <div className="w-32 h-32 md:w-48 md:h-48 bg-white p-2 md:p-3 rounded-2xl md:rounded-3xl border-4 border-bakery-tan shadow-xl overflow-hidden relative">
                           <img 
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=BroBread-${totalWithTax}`}
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=FattinaBolen-${totalWithTax}`}
                             className={`w-full h-full object-contain ${isProcessingQRIS ? 'blur-sm grayscale' : ''}`}
                             alt="QRIS Code"
                           />

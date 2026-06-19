@@ -1,4 +1,4 @@
-# Security Specification for BroBread POS
+# Security Specification for Fattina Bolen POS
 
 ## 1. Data Invariants
 - A transaction must have at least one item.

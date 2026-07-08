@@ -1821,7 +1821,8 @@ CREATE TABLE IF NOT EXISTS public."systemConfigs" (
     "logoUrl" TEXT,
     address TEXT,
     phone TEXT,
-    "primaryColor" TEXT
+    "primaryColor" TEXT,
+    "autoPrint" BOOLEAN DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS public.categories (
@@ -1830,6 +1831,13 @@ CREATE TABLE IF NOT EXISTS public.categories (
     image TEXT,
     color TEXT
 );
+
+-- 1b. Migrasi Kolom Baru (Jika Tabel Sudah Ada tapi Belum Memiliki Kolom Baru)
+ALTER TABLE IF EXISTS public.categories ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE IF EXISTS public.categories ADD COLUMN IF NOT EXISTS image TEXT;
+ALTER TABLE IF EXISTS public.categories ADD COLUMN IF NOT EXISTS color TEXT;
+
+ALTER TABLE IF EXISTS public."systemConfigs" ADD COLUMN IF NOT EXISTS "autoPrint" BOOLEAN DEFAULT false;
 
 -- 2. Nonaktifkan RLS (Row Level Security) Agar Browser Bisa Membaca & Menulis Secara Anonim
 ALTER TABLE IF EXISTS public.users DISABLE ROW LEVEL SECURITY;
@@ -1870,8 +1878,8 @@ INSERT INTO public.categories (name, description, image, color) VALUES
 ('Minuman', 'Minuman segar pilihan sebagai pendamping makan bolen lumer yang lezat.', 'https://images.unsplash.com/photo-1541167760496-162955ed8a9f?q=80&w=800&auto=format&fit=crop', 'from-blue-400/10 to-cyan-500/10')
 ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description, image = EXCLUDED.image, color = EXCLUDED.color;
 
-INSERT INTO public."systemConfigs" (id, name, logo, "logoUrl", address, phone, "primaryColor") VALUES
-('default', 'Fattina Bolen', 'F', '', 'Jl. Raya No. 123, Purwokerto', '0812-3456-7890', '#C58F72')
+INSERT INTO public."systemConfigs" (id, name, logo, "logoUrl", address, phone, "primaryColor", "autoPrint") VALUES
+('default', 'Fattina Bolen', 'F', '', 'Jl. Raya No. 123, Purwokerto', '0812-3456-7890', '#C58F72', false)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.products (id, name, price, category, description, image) VALUES

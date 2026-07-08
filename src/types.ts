@@ -38,4 +38,9 @@ export interface Transaction {
   timestamp: Date;
   paymentMethod: 'cash' | 'e-wallet' | 'card';
   editLogs?: EditLog[];
+  subtotal?: number;
+  discount?: number;
+  tax?: number;
+  cashReceived?: number;
+  change?: number;
 }

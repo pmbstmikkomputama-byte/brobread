@@ -1,7 +1,7 @@
 {
   "name": "Fattina Bolen",
   "description": "Sistem kasir mobile-first untuk toko kue Fattina Bolen, dengan antarmuka yang bersih, manajemen pesanan, dan rekap transaksi.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["bluetooth"],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]

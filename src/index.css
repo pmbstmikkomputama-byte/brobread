@@ -45,3 +45,43 @@
     display: none;
   }
 }
+
+/* Print Styles for thermal printers or standard printer */
+@media print {
+  /* Hide the entire viewport contents */
+  body, html, #root {
+    background: #ffffff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  
+  body * {
+    visibility: hidden !important;
+  }
+  
+  /* Only show the digital receipt and everything inside it */
+  #digital-receipt-canvas, #digital-receipt-canvas * {
+    visibility: visible !important;
+  }
+  
+  #digital-receipt-canvas {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    padding: 10px !important;
+    margin: 0 !important;
+  }
+
+  /* Optimize page margins */
+  @page {
+    margin: 0;
+    size: auto;
+  }
+}
+

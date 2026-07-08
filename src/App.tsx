@@ -5,6 +5,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import * as htmlToImage from 'html-to-image';
 import { 
   ShoppingBag, 
   Trash2, 
@@ -38,6 +39,9 @@ import {
   TrendingUp,
   DollarSign,
   Download,
+  Printer,
+  Bluetooth,
+  Info,
   Users,
   LayoutDashboard,
   MoreHorizontal,
@@ -82,6 +86,36 @@ const formatPrice = (price: number) => {
     currency: 'IDR',
     minimumFractionDigits: 0
   }).format(price);
+};
+
+const getReceiptDetails = (tx: Transaction) => {
+  const subtotal = tx.subtotal !== undefined 
+    ? tx.subtotal 
+    : tx.items.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
+  
+  const total = tx.total;
+  
+  // total = (subtotal - discount) * 1.11
+  // taxableAmount = total / 1.11
+  // discount = subtotal - taxableAmount
+  const taxableAmount = total / 1.11;
+  const calculatedDiscount = Math.max(0, subtotal - taxableAmount);
+  const calculatedTax = total - taxableAmount;
+
+  const discount = tx.discount !== undefined ? tx.discount : Math.round(calculatedDiscount);
+  const tax = tx.tax !== undefined ? tx.tax : Math.round(calculatedTax);
+
+  const cashReceived = tx.cashReceived !== undefined ? tx.cashReceived : total;
+  const change = tx.change !== undefined ? tx.change : 0;
+
+  return {
+    subtotal,
+    discount,
+    tax,
+    total,
+    cashReceived,
+    change
+  };
 };
 
 const CATEGORY_DETAILS: Record<string, { description: string, image: string, color: string }> = {
@@ -875,6 +909,23 @@ const WebsiteSettingsView = ({
                     onChange={(e) => setField('primaryColor', e.target.value)}
                     className="w-full bg-bakery-cream/50 border-2 border-bakery-tan/20 rounded-2xl px-4 py-3 focus:border-bakery-terracotta outline-none font-bold uppercase text-sm"
                   />
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-bakery-muted ml-1">Opsi Printer</label>
+                <div className="flex items-center justify-between p-4 bg-bakery-cream/30 border border-bakery-tan/20 rounded-2xl">
+                  <div className="pr-2">
+                    <p className="text-xs font-bold text-bakery-bark">Cetak Struk Otomatis</p>
+                    <p className="text-[10px] text-bakery-muted font-medium mt-0.5">Menjalankan fungsi cetak setelah transaksi berhasil secara otomatis</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setField('autoPrint', !localConfig.autoPrint)}
+                    className={`w-11 h-6 rounded-full p-0.5 transition-colors duration-200 outline-none relative shrink-0 ${localConfig.autoPrint ? 'bg-[#25D366]' : 'bg-stone-200'}`}
+                  >
+                    <span className={`w-5 h-5 rounded-full bg-white shadow-sm block transform transition-transform duration-200 ${localConfig.autoPrint ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
                 </div>
               </div>
             </div>
@@ -2211,11 +2262,12 @@ export default function App() {
     logoUrl: '',
     address: 'Jl. Raya No. 123, Purwokerto',
     phone: '0812-3456-7890',
-    primaryColor: '#C58F72'
+    primaryColor: '#C58F72',
+    autoPrint: false
   });
   const [quotaError, setQuotaError] = useState(false);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
-  const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
+  const [activeToast, setActiveToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -2227,7 +2279,7 @@ export default function App() {
 
   useEffect(() => {
     (window as any).showToast = (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
-      setToast({ message: msg, type });
+      setActiveToast({ message: msg, type });
     };
     return () => {
       delete (window as any).showToast;
@@ -2235,13 +2287,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (toast) {
+    if (activeToast) {
       const timer = setTimeout(() => {
-        setToast(null);
+        setActiveToast(null);
       }, 3500);
       return () => clearTimeout(timer);
     }
-  }, [toast]);
+  }, [activeToast]);
 
   // Auth Listener
   useEffect(() => {
@@ -2323,6 +2375,12 @@ export default function App() {
   };
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'e-wallet' | 'card'>('cash');
   const [isSuccess, setIsSuccess] = useState(false);
+  const [completedTransaction, setCompletedTransaction] = useState<Transaction | null>(null);
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [customerPhone, setCustomerPhone] = useState<string>('');
+  const [bluetoothDevice, setBluetoothDevice] = useState<any>(null);
+  const [isConnectingBluetooth, setIsConnectingBluetooth] = useState(false);
+  const [showPrinterHelp, setShowPrinterHelp] = useState(false);
   const [cashReceived, setCashReceived] = useState<string>('');
   const [isProcessingQRIS, setIsProcessingQRIS] = useState(false);
   const [discountValue, setDiscountValue] = useState<number>(0);
@@ -2511,7 +2569,12 @@ export default function App() {
       items: [...cart],
       total: totalWithTax,
       timestamp: new Date(),
-      paymentMethod
+      paymentMethod,
+      subtotal: cartTotal,
+      discount: discountAmount,
+      tax: taxAmount,
+      cashReceived: paymentMethod === 'cash' ? (parseFloat(cashReceived) || 0) : totalWithTax,
+      change: paymentMethod === 'cash' ? change : 0
     };
 
     try {
@@ -2522,10 +2585,192 @@ export default function App() {
         setShowCheckout(false);
         setCashReceived('');
         clearCart();
-      }, 2000);
+        
+        // Show digital receipt modal
+        setCompletedTransaction(newTransaction);
+        setShowReceiptModal(true);
+
+        if (systemConfig.autoPrint) {
+          setTimeout(() => {
+            try {
+              window.print();
+              toast("Memulai cetak otomatis...", "success");
+            } catch (printErr) {
+              console.error("Auto-print error:", printErr);
+            }
+          }, 800);
+        }
+      }, 1500);
     } catch (err) {
       toast("Gagal menyimpan transaksi. Periksa koneksi Anda.", "error");
     }
+  };
+
+  const downloadReceipt = async () => {
+    const node = document.getElementById('digital-receipt-canvas');
+    if (!node) {
+      toast("Elemen struk tidak ditemukan.", "error");
+      return;
+    }
+    
+    try {
+      const dataUrl = await htmlToImage.toPng(node, {
+        backgroundColor: '#FCFCFA',
+        style: {
+          transform: 'scale(1)',
+          transformOrigin: 'top left',
+          width: node.offsetWidth + 'px',
+          height: node.offsetHeight + 'px'
+        },
+        quality: 1.0,
+        pixelRatio: 2
+      });
+      
+      const link = document.createElement('a');
+      link.download = `Struk-${completedTransaction?.id || 'FattinaBolen'}.png`;
+      link.href = dataUrl;
+      link.click();
+      toast("Struk berhasil diunduh sebagai gambar!", "success");
+    } catch (error) {
+      console.error('Failed to generate receipt image:', error);
+      toast("Gagal mengunduh struk sebagai gambar.", "error");
+    }
+  };
+
+  const printReceipt = () => {
+    try {
+      window.print();
+      toast("Memulai proses cetak...", "success");
+    } catch (error) {
+      console.error('Failed to trigger browser print:', error);
+      toast("Gagal mencetak struk.", "error");
+    }
+  };
+
+  const shareViaWhatsApp = async () => {
+    const node = document.getElementById('digital-receipt-canvas');
+    if (!node) {
+      toast("Elemen struk tidak ditemukan.", "error");
+      return;
+    }
+
+    try {
+      toast("Memproses gambar struk...", "info");
+      const dataUrl = await htmlToImage.toPng(node, {
+        backgroundColor: '#FCFCFA',
+        style: {
+          transform: 'scale(1)',
+          transformOrigin: 'top left',
+          width: node.offsetWidth + 'px',
+          height: node.offsetHeight + 'px'
+        },
+        quality: 1.0,
+        pixelRatio: 2
+      });
+
+      const fileName = `Struk-${completedTransaction?.id || 'FattinaBolen'}.png`;
+
+      // Standardize phone format if available
+      let cleanPhone = customerPhone.replace(/[^0-9]/g, '');
+      if (cleanPhone.startsWith('0')) {
+        cleanPhone = '62' + cleanPhone.slice(1);
+      }
+
+      // Try to share using native navigator.share if available and supports files
+      let sharedSuccessfully = false;
+      const nav = navigator as any;
+      if (nav.share && nav.canShare) {
+        try {
+          const res = await fetch(dataUrl);
+          const blob = await res.blob();
+          const file = new File([blob], fileName, { type: 'image/png' });
+
+          if (nav.canShare({ files: [file] })) {
+            await nav.share({
+              files: [file],
+              title: `Struk ${completedTransaction?.id || ''}`,
+              text: `Struk Belanja ${systemConfig.name || 'Fattina Bolen'}`
+            });
+            sharedSuccessfully = true;
+            toast("Berhasil membagikan gambar struk!", "success");
+          }
+        } catch (shareErr) {
+          console.warn("Native share failed or dismissed:", shareErr);
+        }
+      }
+
+      if (!sharedSuccessfully) {
+        // Fallback: download file and open WhatsApp deep link
+        const link = document.createElement('a');
+        link.download = fileName;
+        link.href = dataUrl;
+        link.click();
+
+        toast("Gambar struk diunduh otomatis. Silakan lampirkan gambar tersebut di WhatsApp.", "info");
+
+        if (cleanPhone) {
+          const text = `Halo! Terima kasih telah berbelanja di *${systemConfig.name || 'Fattina Bolen'}* 🙏\n\n` +
+            `Berikut kami kirimkan gambar struk belanja Anda. Silakan lampirkan gambar struk yang telah terunduh otomatis ke nomor ini.`;
+          const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
+          setTimeout(() => {
+            window.open(waUrl, '_blank');
+          }, 1200);
+        } else {
+          toast("Isi nomor WhatsApp pelanggan untuk langsung membuka chat WhatsApp.", "info");
+        }
+      }
+    } catch (error) {
+      console.error('Failed to share/generate receipt image:', error);
+      toast("Gagal membagikan struk.", "error");
+    }
+  };
+
+  const connectBluetoothPrinter = async () => {
+    if (typeof window === 'undefined' || !(navigator as any).bluetooth) {
+      toast("Web Bluetooth tidak didukung di browser ini atau di dalam preview iframe. Silakan buka aplikasi di tab baru menggunakan Google Chrome/Edge.", "error");
+      return;
+    }
+
+    setIsConnectingBluetooth(true);
+    try {
+      // Prompt user to select any Bluetooth device
+      const device = await (navigator as any).bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: ['00001101-0000-1000-8000-00805f9b34fb', '000018f0-0000-1000-8000-00805f9b34fb']
+      });
+
+      toast(`Menghubungkan ke ${device.name || 'Printer Bluetooth'}...`, "info");
+      
+      const server = await device.gatt?.connect();
+      console.log('Connected to GATT Server:', server);
+      
+      setBluetoothDevice(device);
+      toast(`Terhubung ke ${device.name || 'Printer Bluetooth'}!`, "success");
+
+      device.addEventListener('gattserverdisconnected', () => {
+        setBluetoothDevice(null);
+        toast("Koneksi printer Bluetooth terputus.", "info");
+      });
+    } catch (error: any) {
+      console.error('Bluetooth connection failed:', error);
+      if (error.name === 'NotFoundError') {
+        toast("Pencarian printer dibatalkan.", "info");
+      } else if (error.name === 'SecurityError') {
+        toast("Iframe membatasi akses Bluetooth. Buka aplikasi di tab baru (tombol di pojok kanan atas) untuk menghubungkan Bluetooth.", "error");
+      } else {
+        toast(`Gagal menghubungkan: ${error.message || error}`, "error");
+      }
+    } finally {
+      setIsConnectingBluetooth(false);
+    }
+  };
+
+  const disconnectBluetoothPrinter = () => {
+    if (bluetoothDevice && bluetoothDevice.gatt?.connected) {
+      bluetoothDevice.gatt.disconnect();
+    }
+    setBluetoothDevice(null);
+    toast("Printer Bluetooth diputuskan.", "success");
   };
 
   if (!currentUser) {
@@ -2722,24 +2967,37 @@ export default function App() {
                       </div>
                       <div className="flex justify-between sm:flex-col items-end pt-3 sm:pt-0 border-t sm:border-t-0 border-bakery-tan/20 grow">
                         <div className="flex items-center gap-4">
-                          {userRole === 'admin' && (
-                            <div className="flex gap-2">
-                              <button 
-                                onClick={() => setEditingTransaction(tx)}
-                                className="p-2.5 bg-bakery-bark/5 hover:bg-bakery-bark/10 text-bakery-bark rounded-xl transition-all"
-                                title="Edit Transaksi"
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <button 
-                                onClick={() => { if (confirm('Hapus riwayat transaksi ini?')) setTransactions(transactions.filter(t => t.id !== tx.id)); }}
-                                className="p-2.5 bg-red-50 hover:bg-red-100 text-red-500 rounded-xl transition-all"
-                                title="Hapus Transaksi"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          )}
+                          <div className="flex gap-2">
+                            {userRole === 'admin' && (
+                              <>
+                                <button 
+                                  onClick={() => setEditingTransaction(tx)}
+                                  className="p-2.5 bg-bakery-bark/5 hover:bg-bakery-bark/10 text-bakery-bark rounded-xl transition-all"
+                                  title="Edit Transaksi"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button 
+                                  onClick={() => { if (confirm('Hapus riwayat transaksi ini?')) setTransactions(transactions.filter(t => t.id !== tx.id)); }}
+                                  className="p-2.5 bg-red-50 hover:bg-red-100 text-red-500 rounded-xl transition-all"
+                                  title="Hapus Transaksi"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                            <button 
+                              onClick={() => {
+                                setCompletedTransaction(tx);
+                                setShowReceiptModal(true);
+                              }}
+                              className="p-2.5 bg-bakery-tan/20 hover:bg-bakery-tan/45 text-bakery-terracotta rounded-xl transition-all flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider font-sans"
+                              title="Lihat Struk Digital"
+                            >
+                              <ReceiptText className="w-4 h-4" />
+                              <span>Struk</span>
+                            </button>
+                          </div>
                           <div className="text-right">
                             <p className="text-lg font-black text-bakery-bark">{formatPrice(tx.total)}</p>
                             <p className="text-[10px] text-bakery-muted font-bold uppercase">{tx.items.reduce((a, b) => a + b.quantity, 0)} Item</p>
@@ -3563,10 +3821,298 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
- 
+
+      {/* Struk Digital Modal */}
+      <AnimatePresence>
+        {showReceiptModal && completedTransaction && (() => {
+          const { subtotal, discount, tax, total, cashReceived, change } = getReceiptDetails(completedTransaction);
+          return (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm animate-fade-in"
+            >
+              <motion.div
+                initial={{ scale: 0.95, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 20 }}
+                className="bg-white max-w-md w-full rounded-[32px] p-6 shadow-2xl border border-bakery-tan flex flex-col max-h-[90vh] overflow-hidden"
+              >
+                {/* Header */}
+                <div className="flex justify-between items-center mb-4 pb-3 border-b border-stone-100 shrink-0">
+                  <div>
+                    <h3 className="text-lg font-serif font-bold text-bakery-bark">Struk Digital</h3>
+                    <p className="text-xs text-stone-500 font-medium">Fattina Bolen POS</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowReceiptModal(false);
+                      setCompletedTransaction(null);
+                      setCustomerPhone('');
+                    }}
+                    className="p-2 bg-stone-100 text-stone-500 hover:text-stone-700 rounded-full transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Bluetooth Printer Status & Help Toggle */}
+                <div className="mb-4 bg-stone-50 rounded-2xl p-3 border border-stone-200/60 flex flex-col gap-2 shrink-0">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`p-1.5 rounded-lg ${bluetoothDevice ? 'bg-green-50 text-green-600' : 'bg-stone-100 text-stone-500'}`}>
+                        <Bluetooth className={`w-4.5 h-4.5 ${isConnectingBluetooth ? 'animate-pulse' : ''}`} />
+                      </div>
+                      <div className="text-left">
+                        <p className="text-[10px] uppercase font-bold tracking-wider text-stone-400">Status Printer</p>
+                        <p className="text-xs font-bold text-stone-800">
+                          {bluetoothDevice ? (bluetoothDevice.name || 'Terhubung') : 'Printer Belum Terhubung'}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex gap-1.5">
+                      {bluetoothDevice ? (
+                        <button
+                          onClick={disconnectBluetoothPrinter}
+                          className="px-2 py-1 bg-red-50 text-red-600 hover:bg-red-100 text-[10px] font-bold rounded-lg transition-colors cursor-pointer font-sans"
+                        >
+                          Putuskan
+                        </button>
+                      ) : (
+                        <button
+                          onClick={connectBluetoothPrinter}
+                          disabled={isConnectingBluetooth}
+                          className="px-2.5 py-1 bg-bakery-terracotta text-white hover:bg-bakery-terracotta/90 disabled:opacity-50 text-[10px] font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1 font-sans"
+                        >
+                          {isConnectingBluetooth ? 'Mencari...' : 'Hubungkan'}
+                        </button>
+                      )}
+                      
+                      <button
+                        onClick={() => setShowPrinterHelp(!showPrinterHelp)}
+                        className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${showPrinterHelp ? 'bg-bakery-cream border-bakery-tan text-bakery-terracotta' : 'bg-white border-stone-200 text-stone-500 hover:text-stone-800'}`}
+                        title="Panduan Cetak"
+                      >
+                        <Info className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Printer Connection Help panel */}
+                  {showPrinterHelp && (
+                    <div className="border-t border-stone-200/60 pt-2.5 mt-1 text-[11px] text-stone-600 space-y-2 font-sans leading-relaxed text-left">
+                      <p className="font-bold text-stone-800 flex items-center gap-1">
+                        🛠️ Panduan Cetak Thermal Bluetooth:
+                      </p>
+                      <ol className="list-decimal list-inside space-y-1 text-stone-500">
+                        <li>Pastikan Bluetooth di smartphone/laptop aktif.</li>
+                        <li>Nyalakan Printer Thermal Bluetooth Anda.</li>
+                        <li>Buka aplikasi ini di <strong>Tab Baru</strong> (klik tombol <i>"Buka Tab Baru"</i> di kanan atas layar jika Anda berada di dalam editor) karena pembatasan keamanan iframe.</li>
+                        <li>Klik <strong>"Hubungkan"</strong> di atas, pilih nama printer Anda, lalu klik hubungkan.</li>
+                        <li>Gunakan tombol <strong>"Cetak Struk"</strong> di bawah untuk mencetak langsung menggunakan driver printer thermal Anda (atur ukuran kertas ke 58mm atau 80mm).</li>
+                      </ol>
+                    </div>
+                  )}
+                </div>
+
+                {/* Scrollable Receipt Area */}
+                <div className="flex-1 overflow-y-auto pr-1 space-y-6">
+                  
+                  {/* The printable receipt paper */}
+                  <div 
+                    id="digital-receipt-canvas" 
+                    className="bg-[#FCFCFA] p-6 rounded-2xl border border-stone-200/60 shadow-sm text-stone-900 font-mono text-xs leading-relaxed max-w-sm mx-auto"
+                  >
+                    {/* Receipt Header */}
+                    <div className="text-center space-y-1 mb-4">
+                      <h4 className="text-base font-serif font-black tracking-tight text-stone-950 uppercase">
+                        {systemConfig.name || 'Fattina Bolen'}
+                      </h4>
+                      <p className="text-[10px] text-stone-500 max-w-[240px] mx-auto leading-tight">
+                        {systemConfig.address || 'Jl. Raya No. 123, Purwokerto'}
+                      </p>
+                      <p className="text-[10px] text-stone-500">
+                        Telp: {systemConfig.phone || '0812-3456-7890'}
+                      </p>
+                    </div>
+
+                    {/* Dotted Divider */}
+                    <div className="border-t border-dashed border-stone-300 my-3" />
+
+                    {/* Tx Info */}
+                    <div className="space-y-1 text-[10px] text-stone-600">
+                      <div className="flex justify-between">
+                        <span>No. Transaksi:</span>
+                        <span className="font-bold text-stone-950">{completedTransaction.id}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Tanggal:</span>
+                        <span>{new Date(completedTransaction.timestamp).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Kasir:</span>
+                        <span>{currentUser?.name || 'Administrator'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Metode:</span>
+                        <span className="uppercase font-bold text-stone-950">
+                          {completedTransaction.paymentMethod === 'cash' ? 'Tunai' : completedTransaction.paymentMethod === 'e-wallet' ? 'QRIS / E-Wallet' : 'Kartu'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Dotted Divider */}
+                    <div className="border-t border-dashed border-stone-300 my-3" />
+
+                    {/* Items List */}
+                    <div className="space-y-2 text-[10px]">
+                      {completedTransaction.items.map((item, index) => (
+                        <div key={index} className="space-y-0.5">
+                          <div className="font-bold text-stone-950 text-[11px]">{item.product.name}</div>
+                          <div className="flex justify-between text-stone-600">
+                            <span>{item.quantity} x {formatPrice(item.product.price)}</span>
+                            <span className="font-bold text-stone-900">{formatPrice(item.product.price * item.quantity)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Dotted Divider */}
+                    <div className="border-t border-dashed border-stone-300 my-3" />
+
+                    {/* Total calculations */}
+                    <div className="space-y-1 text-[10px] text-stone-700">
+                      <div className="flex justify-between">
+                        <span>Subtotal:</span>
+                        <span>{formatPrice(subtotal)}</span>
+                      </div>
+                      {discount > 0 && (
+                        <div className="flex justify-between text-green-600">
+                          <span>Diskon:</span>
+                          <span>-{formatPrice(discount)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between">
+                        <span>PPN (11%):</span>
+                        <span>{formatPrice(tax)}</span>
+                      </div>
+                      
+                      <div className="border-t border-dashed border-stone-200 my-1" />
+                      
+                      <div className="flex justify-between text-stone-950 text-sm font-black pt-1">
+                        <span>TOTAL:</span>
+                        <span>{formatPrice(total)}</span>
+                      </div>
+
+                      {completedTransaction.paymentMethod === 'cash' && (
+                        <div className="space-y-0.5 pt-1 text-[10px] text-stone-500">
+                          <div className="flex justify-between">
+                            <span>Bayar (Tunai):</span>
+                            <span>{formatPrice(cashReceived)}</span>
+                          </div>
+                          <div className="flex justify-between font-bold text-stone-800">
+                            <span>Kembali:</span>
+                            <span>{formatPrice(change)}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Dotted Divider */}
+                    <div className="border-t border-dashed border-stone-300 my-4" />
+
+                    {/* Mock Barcode */}
+                    <div className="space-y-2 mb-2">
+                      <div className="flex justify-center items-center gap-[2px] h-8 opacity-75">
+                        <div className="w-[2px] h-full bg-stone-950" />
+                        <div className="w-[1px] h-full bg-stone-950" />
+                        <div className="w-[3px] h-full bg-stone-950" />
+                        <div className="w-[1px] h-full bg-stone-950" />
+                        <div className="w-[4px] h-full bg-stone-950" />
+                        <div className="w-[2px] h-full bg-stone-950" />
+                        <div className="w-[1px] h-full bg-stone-950" />
+                        <div className="w-[1px] h-full bg-stone-950" />
+                        <div className="w-[3px] h-full bg-stone-950" />
+                        <div className="w-[2px] h-full bg-stone-950" />
+                        <div className="w-[1px] h-full bg-stone-950" />
+                        <div className="w-[3px] h-full bg-stone-950" />
+                        <div className="w-[2px] h-full bg-stone-950" />
+                        <div className="w-[4px] h-full bg-stone-950" />
+                      </div>
+                      <div className="text-center text-[8px] text-stone-400 font-sans tracking-widest uppercase">
+                        Terima kasih atas kunjungan Anda
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sharing / Actions Section */}
+                  <div className="space-y-4 bg-stone-50 p-4 rounded-2xl border border-stone-200/50">
+                    <div className="flex items-center gap-2 text-stone-700 text-xs font-bold">
+                      <Smartphone className="w-4 h-4 text-bakery-terracotta" />
+                      <span>Bagikan Struk Gambar ke WA</span>
+                    </div>
+                    
+                    <div className="flex gap-2">
+                      <input
+                        type="tel"
+                        placeholder="No. WhatsApp (cth: 08123456789) - Opsional"
+                        value={customerPhone}
+                        onChange={(e) => setCustomerPhone(e.target.value)}
+                        className="flex-1 bg-white border border-stone-300 px-3 py-2 rounded-xl text-xs outline-none focus:ring-2 focus:ring-bakery-terracotta/20 text-stone-800 font-sans"
+                      />
+                      <button
+                        onClick={shareViaWhatsApp}
+                        className="bg-[#25D366] hover:bg-[#20ba5a] text-white px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm shrink-0 cursor-pointer font-sans"
+                      >
+                        Kirim WA
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-stone-500 italic leading-relaxed font-sans">
+                      *Tips: Fitur ini akan membagikan gambar struk belanja langsung. Jika tidak didukung oleh browser Anda, gambar struk otomatis terunduh, lalu silakan lampirkan gambar tersebut di chat WhatsApp pelanggan.*
+                    </p>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="mt-4 pt-3 border-t border-stone-100 flex flex-col gap-2.5 shrink-0">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={printReceipt}
+                      className="flex-1 bg-bakery-bark hover:bg-bakery-bark/95 text-white py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-md shadow-bakery-bark/15 cursor-pointer font-sans"
+                    >
+                      <Printer className="w-4 h-4" />
+                      <span>Cetak Struk</span>
+                    </button>
+                    <button
+                      onClick={downloadReceipt}
+                      className="flex-1 bg-bakery-terracotta hover:bg-bakery-terracotta/90 text-white py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-md shadow-bakery-terracotta/15 cursor-pointer font-sans"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Unduh PNG</span>
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowReceiptModal(false);
+                      setCompletedTransaction(null);
+                      setCustomerPhone('');
+                    }}
+                    className="w-full bg-stone-100 hover:bg-stone-200 text-stone-700 py-3 px-6 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer font-sans"
+                  >
+                    Selesai
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+
       {/* Toast Notification */}
       <AnimatePresence>
-        {toast && (
+        {activeToast && (
           <motion.div
             initial={{ opacity: 0, y: 50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -3574,21 +4120,21 @@ export default function App() {
             className="fixed bottom-6 right-6 z-[999] flex items-center gap-3 bg-white px-5 py-4 rounded-2xl shadow-xl border border-bakery-tan/20 max-w-sm"
           >
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-              toast.type === 'success' ? 'bg-green-50 text-green-600' :
-              toast.type === 'error' ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-blue-500'
+              activeToast.type === 'success' ? 'bg-green-50 text-green-600' :
+              activeToast.type === 'error' ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-blue-500'
             }`}>
-              {toast.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : 
-               toast.type === 'error' ? <AlertTriangle className="w-5 h-5" /> : <Package className="w-5 h-5" />}
+              {activeToast.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : 
+               activeToast.type === 'error' ? <AlertTriangle className="w-5 h-5" /> : <Package className="w-5 h-5" />}
             </div>
             <div className="flex-1 min-w-0 pr-1">
               <p className="text-xs font-bold uppercase tracking-wider text-bakery-muted">
-                {toast.type === 'success' ? 'Sukses' :
-                 toast.type === 'error' ? 'Peringatan' : 'Informasi'}
+                {activeToast.type === 'success' ? 'Sukses' :
+                 activeToast.type === 'error' ? 'Peringatan' : 'Informasi'}
               </p>
-              <p className="text-xs font-black text-bakery-bark leading-snug mt-0.5">{toast.message}</p>
+              <p className="text-xs font-black text-bakery-bark leading-snug mt-0.5">{activeToast.message}</p>
             </div>
             <button 
-              onClick={() => setToast(null)}
+              onClick={() => setActiveToast(null)}
               className="p-1 rounded-lg text-bakery-muted hover:text-bakery-bark transition-colors hover:bg-bakery-cream"
             >
               <X className="w-4 h-4" />

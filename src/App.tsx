@@ -53,7 +53,13 @@ import {
   User as UserIcon,
   Upload,
   AlertTriangle,
-  Copy
+  Copy,
+  RefreshCw,
+  Cloud,
+  CloudOff,
+  Database,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -2277,6 +2283,13 @@ export default function App() {
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
   const [activeToast, setActiveToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
 
+  // Real-time Database Sync States
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('syncing');
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [showSyncDetails, setShowSyncDetails] = useState(false);
+
   useEffect(() => {
     const handleResize = () => {
       setIsDesktop(window.innerWidth >= 768);
@@ -2302,6 +2315,28 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [activeToast]);
+
+  // Network Connectivity Watcher
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      setSyncStatus('syncing');
+      refreshAllData();
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      setSyncStatus('error');
+      toast("Koneksi terputus. Menggunakan mode offline (data disimpan lokal).", "info");
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Auth Listener
   useEffect(() => {
@@ -2330,19 +2365,69 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Manual Trigger to Synchronize All Data
+  const refreshAllData = async () => {
+    setSyncStatus('syncing');
+    try {
+      const pData = await firebaseService.getProducts();
+      setProducts(pData);
+      
+      const tData = await firebaseService.getTransactions();
+      setTransactions(tData);
+
+      await refreshCategories();
+
+      const cfg = await firebaseService.getConfig();
+      if (cfg) setSystemConfig(cfg);
+
+      setLastSyncedAt(new Date());
+      setSyncStatus('synced');
+      setSyncError(null);
+      toast("Data berhasil disinkronkan dengan database!", "success");
+    } catch (err: any) {
+      console.error("Manual refresh failed:", err);
+      setSyncStatus('error');
+      setSyncError(err?.message || "Gagal sinkronisasi data");
+      toast("Gagal menyinkronkan data dengan database.", "error");
+    }
+  };
+
   // Data Listeners
   useEffect(() => {
     if (!currentUser) return;
 
     const handleDbError = (err: any) => {
       console.error("Firestore Listener Error captured: ", err);
+      setSyncStatus('error');
+      setSyncError(err?.message || "Gagal sinkronisasi data");
       if (err?.code === 'resource-exhausted' || err?.message?.includes('resource-exhausted') || err?.message?.includes('Quota exceeded')) {
         setQuotaError(true);
       }
     };
 
-    const unsubProducts = firebaseService.onProductsChange(setProducts, handleDbError);
-    const unsubTransactions = firebaseService.onTransactionsChange(setTransactions, handleDbError);
+    setSyncStatus('syncing');
+
+    const unsubProducts = firebaseService.onProductsChange(
+      (data) => {
+        setProducts(data);
+        setLastSyncedAt(new Date());
+        setSyncStatus(prev => prev === 'error' ? 'error' : 'synced');
+      },
+      (err) => {
+        handleDbError(err);
+      }
+    );
+
+    const unsubTransactions = firebaseService.onTransactionsChange(
+      (data) => {
+        setTransactions(data);
+        setLastSyncedAt(new Date());
+        setSyncStatus(prev => prev === 'error' ? 'error' : 'synced');
+      },
+      (err) => {
+        handleDbError(err);
+      }
+    );
 
     // Initial Fetch for categories and config
     firebaseService.getCategoriesWithDetails().then(catsWithDetails => {
@@ -2357,6 +2442,7 @@ export default function App() {
       });
       setCategoryDetails(detailsMap);
     }).catch(handleDbError);
+
     firebaseService.getConfig().then(cfg => {
       if (cfg) setSystemConfig(cfg);
     }).catch(handleDbError);
@@ -2941,9 +3027,124 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex items-center bg-white px-4 py-2 rounded-2xl border border-bakery-tan/50 shadow-sm">
-              <span className="w-2.5 h-2.5 bg-green-500 rounded-full mr-2.5 shadow-[0_0_12px_rgba(34,197,94,0.8)] animate-pulse"></span>
-              <span className="text-[10px] font-black text-bakery-bark uppercase tracking-[0.2em]">Online</span>
+            <div className="relative">
+              <button
+                onClick={() => setShowSyncDetails(!showSyncDetails)}
+                className="flex items-center bg-white px-4 py-2.5 rounded-2xl border border-bakery-tan/50 shadow-sm hover:bg-stone-50 active:scale-[0.98] transition-all cursor-pointer select-none gap-2 text-left"
+                title="Klik untuk detail sinkronisasi real-time"
+              >
+                {syncStatus === 'synced' && isOnline ? (
+                  <>
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]"></span>
+                    </span>
+                    <Cloud className="w-3.5 h-3.5 text-emerald-600 hidden sm:inline" />
+                    <span className="text-[10px] font-black text-bakery-bark uppercase tracking-[0.2em]">Tersambung</span>
+                  </>
+                ) : syncStatus === 'syncing' && isOnline ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 text-bakery-terracotta animate-spin" />
+                    <span className="text-[10px] font-black text-bakery-bark uppercase tracking-[0.2em] animate-pulse">Sinkronisasi</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)] animate-pulse"></span>
+                    </span>
+                    <CloudOff className="w-3.5 h-3.5 text-amber-600 hidden sm:inline" />
+                    <span className="text-[10px] font-black text-bakery-bark uppercase tracking-[0.2em]">{isOnline ? 'Ada Masalah' : 'Offline'}</span>
+                  </>
+                )}
+              </button>
+
+              {/* Sync Details Dropdown / Popover */}
+              <AnimatePresence>
+                {showSyncDetails && (
+                  <>
+                    {/* Backdrop overlay to close */}
+                    <div className="fixed inset-0 z-40" onClick={() => setShowSyncDetails(false)} />
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute right-0 mt-3 w-80 bg-white border border-bakery-tan/30 rounded-2xl p-5 shadow-2xl z-50 overflow-hidden font-sans text-left"
+                    >
+                      <div className="flex items-center justify-between border-b border-stone-100 pb-3 mb-4">
+                        <div className="flex items-center gap-2">
+                          <Database className="w-4 h-4 text-bakery-bark" />
+                          <h4 className="font-serif font-black text-bakery-bark text-sm">Status Sinkronisasi</h4>
+                        </div>
+                        <button
+                          onClick={() => setShowSyncDetails(false)}
+                          className="text-stone-400 hover:text-stone-600 p-1 rounded-lg hover:bg-stone-50"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      <div className="space-y-4">
+                        {/* Connection status line */}
+                        <div className="flex justify-between items-center bg-stone-50 p-2.5 rounded-xl border border-stone-100">
+                          <span className="text-xs text-stone-500 font-semibold flex items-center gap-1.5">
+                            {isOnline ? <Wifi className="w-3.5 h-3.5 text-emerald-500" /> : <WifiOff className="w-3.5 h-3.5 text-stone-400" />}
+                            Jaringan
+                          </span>
+                          <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg ${isOnline ? 'bg-emerald-50 text-emerald-700' : 'bg-stone-100 text-stone-500'}`}>
+                            {isOnline ? 'Online (Internet)' : 'Offline (Lokal)'}
+                          </span>
+                        </div>
+
+                        {/* Sync status indicators */}
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-stone-500 font-semibold flex items-center gap-1.5">
+                              <Database className="w-3.5 h-3.5 text-stone-400" />
+                              Status Basis Data
+                            </span>
+                            <span className={`text-xs font-bold ${syncStatus === 'synced' ? 'text-emerald-600' : syncStatus === 'syncing' ? 'text-bakery-terracotta' : 'text-amber-600'}`}>
+                              {syncStatus === 'synced' ? 'Tersinkronisasi' : syncStatus === 'syncing' ? 'Menghubungkan...' : 'Koneksi Terganggu'}
+                            </span>
+                          </div>
+
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-stone-500 font-semibold flex items-center gap-1.5">
+                              <RefreshCw className="w-3.5 h-3.5 text-stone-400" />
+                              Terakhir Sinkron
+                            </span>
+                            <span className="text-stone-700 font-semibold text-right">
+                              {lastSyncedAt ? lastSyncedAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Belum Pernah'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {syncError && (
+                          <div className="p-2.5 bg-red-50 text-red-700 border border-red-100 rounded-xl text-[11px] font-medium flex items-start gap-2">
+                            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                            <span>{syncError}</span>
+                          </div>
+                        )}
+
+                        <div className="text-[10px] text-stone-500 leading-relaxed border-t border-stone-100 pt-3 italic">
+                          *Sistem POS ini mendukung sinkronisasi real-time dua arah ke database cloud Firestore/Supabase. Jika koneksi terputus, penjualan dan stok akan tersimpan di cache lokal peramban Anda secara otomatis dan disinkronkan saat tersambung kembali.*
+                        </div>
+
+                        <button
+                          onClick={async () => {
+                            await refreshAllData();
+                          }}
+                          disabled={syncStatus === 'syncing'}
+                          className="w-full mt-2 bg-bakery-bark hover:bg-bakery-bark/95 disabled:opacity-50 text-white font-black text-[10px] uppercase tracking-wider py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-bakery-bark/10 font-sans"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+                          <span>Sinkronkan Sekarang</span>
+                        </button>
+                      </div>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         </header>

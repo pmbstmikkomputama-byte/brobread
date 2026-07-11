@@ -2741,6 +2741,16 @@ export default function App() {
 
     setIsConnectingBluetooth(true);
     try {
+      // Check Bluetooth availability first if supported by browser
+      if ((navigator as any).bluetooth.getAvailability) {
+        const available = await (navigator as any).bluetooth.getAvailability();
+        if (!available) {
+          toast("Adaptor Bluetooth tidak aktif atau tidak tersedia di perangkat Anda. Silakan aktifkan Bluetooth terlebih dahulu.", "error");
+          setIsConnectingBluetooth(false);
+          return;
+        }
+      }
+
       // Prompt user to select any Bluetooth device
       const device = await (navigator as any).bluetooth.requestDevice({
         acceptAllDevices: true,
@@ -2761,7 +2771,10 @@ export default function App() {
       });
     } catch (error: any) {
       console.error('Bluetooth connection failed:', error);
-      if (error.name === 'NotFoundError') {
+      const errMsg = error?.message || '';
+      if (errMsg.toLowerCase().includes('adapter not available') || errMsg.toLowerCase().includes('bluetooth adapter not available')) {
+        toast("Adaptor Bluetooth tidak aktif atau tidak tersedia di perangkat Anda. Silakan aktifkan Bluetooth terlebih dahulu.", "error");
+      } else if (error.name === 'NotFoundError') {
         toast("Pencarian printer dibatalkan.", "info");
       } else if (error.name === 'SecurityError') {
         toast("Iframe membatasi akses Bluetooth. Buka aplikasi di tab baru (tombol di pojok kanan atas) untuk menghubungkan Bluetooth.", "error");
